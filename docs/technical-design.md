@@ -59,7 +59,6 @@ id = "my-app"
 name = "My App"
 path = "/Users/me/projects/my-app"
 agent = "claude"
-agent_command = ""   # 可选，覆盖预设命令
 ```
 
 v1 规划扩展：
@@ -91,7 +90,7 @@ context_file = "termana.context.md"   # 归一化上下文源
 ## 6. 适配器设计
 终端与 agent 都走 adapter 模式，加新终端 / 新 agent = 加一个文件：
 - **TerminalAdapter** trait：`launch(dir, command)`。已实现：`MacTerminal`、`WindowsPowerShell`。未来：iTerm2、Ghostty、Alacritty、Kitty。
-- **Agent 列表**：id / name / command，存 config、首次用默认（claude/codex/aider/opencode）填充，用户可增删改；`list_agents` 对列表里每个命令做安装检测。未来扩展为 AgentAdapter 负责 context emit。
+- **Agent 列表**：built-in 预设从 `agents.toml`（项目根，纯 key-value：`"名称" = "命令"`，编译期 `include_str!` 嵌入）加载，标记 built-in、不可改不可删；用户自定义 agent 存 config、可增删改。`list_agents` 合并两者并做安装检测。未来扩展为 AgentAdapter 负责 context emit。
 - **安装检测**：`list_agents` 一次性在用户实际用的 shell 里检查所有 agent（unix：`$SHELL -ilc` 跑 `command -v` 且只认返回绝对路径的外部命令；windows：`powershell -Command` 跑 `Get-Command -CommandType Application`，加载 profile），匹配终端拉起时实际看到的 PATH（fnm / nvm / volta 等 rc/profile 设置也生效），不会被 shell builtin（如 `continue`）误判。前端只让选已装的 agent。预设含 claude / codex / aider / opencode。
 
 ## 7. 跨平台注意

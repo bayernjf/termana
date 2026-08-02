@@ -56,7 +56,6 @@ id = "my-app"
 name = "My App"
 path = "/Users/me/projects/my-app"
 agent = "claude"
-agent_command = ""   # optional, overrides the agent's command
 
 [[agents]]
 id = "claude"
