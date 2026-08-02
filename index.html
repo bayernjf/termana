@@ -44,7 +44,10 @@
           <h2 class="section-title">
             Agents <span class="section-hint">detected on your PATH</span>
           </h2>
-          <button class="link-btn" id="toggle-add-agent">+ Add</button>
+          <div class="section-actions">
+            <button class="link-btn" id="refresh-agents" title="Re-detect installed agents"><span class="spin-icon">↻</span> Refresh</button>
+            <button class="link-btn" id="toggle-add-agent">+ Add</button>
+          </div>
         </div>
         <div id="agents-list" class="agents"></div>
         <form id="agent-form" class="form hidden">

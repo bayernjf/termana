@@ -144,6 +144,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("agent-form")!.classList.toggle("hidden");
   });
 
+  document.getElementById("refresh-agents")!.addEventListener("click", async () => {
+    const btn = document.getElementById("refresh-agents") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      await refreshAgents();
+    } finally {
+      btn.classList.remove("spinning");
+      btn.disabled = false;
+    }
+  });
+
   const pathInput = document.getElementById("path") as HTMLInputElement;
   const nameInput = document.getElementById("name") as HTMLInputElement;
   let nameTouched = false;

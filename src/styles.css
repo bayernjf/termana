@@ -120,6 +120,25 @@ body {
   background: var(--bg-elevated);
 }
 
+.section-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.spin-icon {
+  display: inline-block;
+}
+
+#refresh-agents.spinning .spin-icon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ---- projects ---- */
 .projects {
   display: flex;
