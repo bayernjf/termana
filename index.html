@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>termana</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          <span class="brand-name">termana</span>
+        </div>
+        <p class="tagline">terminal projects · one click to launch</p>
+      </header>
+
+      <section class="section">
+        <div class="section-head">
+          <h2 class="section-title">Projects</h2>
+          <button class="link-btn" id="toggle-add-project">+ Add</button>
+        </div>
+        <div id="projects" class="projects"></div>
+        <form id="add-form" class="form hidden">
+          <div class="form-row">
+            <input id="name" placeholder="Project name" required />
+            <input id="path" placeholder="/absolute/path/to/project" required />
+          </div>
+          <div class="form-row">
+            <select id="agent"></select>
+            <input id="command" placeholder="Custom command (optional)" />
+            <button type="submit" class="btn-primary">Add project</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2 class="section-title">
+            Agents <span class="section-hint">detected on your PATH</span>
+          </h2>
+          <button class="link-btn" id="toggle-add-agent">+ Add</button>
+        </div>
+        <div id="agents-list" class="agents"></div>
+        <form id="agent-form" class="form hidden">
+          <div class="form-row">
+            <input id="agent-name" placeholder="Agent name (e.g. Gemini)" required />
+            <input id="agent-command" placeholder="Command (e.g. gemini)" required />
+            <button type="submit" class="btn-primary" id="agent-submit">Add agent</button>
+            <button type="button" class="btn-ghost hidden" id="agent-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>
