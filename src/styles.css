@@ -301,6 +301,9 @@ body {
 }
 
 .agent-status {
+  width: 80px;
+  flex-shrink: 0;
+  text-align: right;
   font-size: 11px;
   color: var(--text-dim);
   font-family: var(--mono);
@@ -310,8 +313,14 @@ body {
   color: var(--accent);
 }
 
+.agent-kind {
+  width: 80px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+
 .tag-builtIn {
-  margin-left: auto;
   font-size: 10px;
   color: var(--text-dim);
   font-family: var(--mono);
@@ -321,6 +330,18 @@ body {
   padding: 1px 7px;
   border-radius: 999px;
   white-space: nowrap;
+}
+
+.agent-actions {
+  width: 60px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.agent-actions .icon-btn {
+  margin-left: 0;
 }
 
 /* ---- forms ---- */

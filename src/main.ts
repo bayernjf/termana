@@ -57,8 +57,9 @@ function renderAgents() {
   }
   container.innerHTML = agents
     .map((a) => {
+      const kind = a.builtIn ? `<span class="tag-builtIn">built-in</span>` : "";
       const actions = a.builtIn
-        ? `<span class="tag-builtIn">built-in</span>`
+        ? ""
         : `<button class="icon-btn edit" data-id="${escapeHtml(a.id)}" title="Edit">✎</button>
            <button class="icon-btn delete" data-id="${escapeHtml(a.id)}" title="Remove agent">✕</button>`;
       return `
@@ -66,8 +67,9 @@ function renderAgents() {
       <span class="status-dot ${a.installed ? "on" : ""}"></span>
       <span class="agent-name">${escapeHtml(a.name)}</span>
       <span class="agent-cmd" title="${escapeHtml(a.command)}">${escapeHtml(a.command)}</span>
+      <span class="agent-kind">${kind}</span>
       <span class="agent-status ${a.installed ? "on" : ""}">${a.installed ? "installed" : "missing"}</span>
-      ${actions}
+      <span class="agent-actions">${actions}</span>
     </div>`;
     })
     .join("");
