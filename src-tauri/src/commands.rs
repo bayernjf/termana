@@ -3,25 +3,13 @@ use crate::config::{self, Agent, Project};
 use serde::Serialize;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub id: String,
     pub name: String,
     pub command: String,
     pub installed: bool,
-}
-
-fn slugify(s: &str) -> String {
-    let base: String = s
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    let trimmed = base.trim_matches('-').to_string();
-    if trimmed.is_empty() {
-        "item".to_string()
-    } else {
-        trimmed
-    }
+    pub built_in: bool,
 }
 
 fn unique_project_id(projects: &[Project], base: &str) -> String {
@@ -52,12 +40,7 @@ pub fn list_projects() -> Vec<Project> {
 }
 
 #[tauri::command]
-pub fn add_project(
-    name: String,
-    path: String,
-    agent: String,
-    command: Option<String>,
-) -> Result<Project, String> {
+pub fn add_project(name: String, path: String, agent: String) -> Result<Project, String> {
     if name.trim().is_empty() {
         return Err("name is required".into());
     }
@@ -65,13 +48,12 @@ pub fn add_project(
         return Err("path is required".into());
     }
     let mut cfg = config::load();
-    let id = unique_project_id(&cfg.projects, &slugify(&name));
+    let id = unique_project_id(&cfg.projects, &config::slugify(&name));
     let project = Project {
         id,
         name: name.trim().to_string(),
         path: path.trim().to_string(),
         agent,
-        agent_command: command.filter(|c| !c.trim().is_empty()),
     };
     cfg.projects.push(project.clone());
     config::save(&cfg)?;
@@ -93,16 +75,13 @@ pub fn launch_project(id: String) -> Result<(), String> {
         .iter()
         .find(|p| p.id == id)
         .ok_or_else(|| format!("project not found: {}", id))?;
-    let agents = if cfg.agents.is_empty() {
-        config::default_agents()
-    } else {
-        cfg.agents.clone()
-    };
-    // Resolve: explicit override > configured agent's command > raw agent id.
-    let command = project
-        .agent_command
-        .clone()
-        .or_else(|| agents.iter().find(|a| a.id == project.agent).map(|a| a.command.clone()))
+    // Resolve: built-in agent > custom agent > raw agent id.
+    let builtins = config::builtin_agents();
+    let command = builtins
+        .iter()
+        .find(|a| a.id == project.agent)
+        .map(|a| a.command.clone())
+        .or_else(|| cfg.agents.iter().find(|a| a.id == project.agent).map(|a| a.command.clone()))
         .unwrap_or_else(|| project.agent.clone());
     let term = terminal::default_terminal();
     term.launch(&project.path, &command)
@@ -112,17 +91,31 @@ pub fn launch_project(id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn list_agents() -> Vec<AgentInfo> {
-    let agents = config::load_agents_or_seed();
-    let commands: Vec<&str> = agents.iter().map(|a| a.command.as_str()).collect();
+    let builtins = config::builtin_agents();
+    let builtin_ids: std::collections::HashSet<&str> =
+        builtins.iter().map(|a| a.id.as_str()).collect();
+    let custom: Vec<Agent> = config::load()
+        .agents
+        .into_iter()
+        .filter(|a| !builtin_ids.contains(a.id.as_str()))
+        .collect();
+
+    let all: Vec<(Agent, bool)> = builtins
+        .into_iter()
+        .map(|a| (a, true))
+        .chain(custom.into_iter().map(|a| (a, false)))
+        .collect();
+
+    let commands: Vec<&str> = all.iter().map(|(a, _)| a.command.as_str()).collect();
     let installed = agent::installed_status(&commands);
-    agents
-        .iter()
+    all.iter()
         .enumerate()
-        .map(|(i, a)| AgentInfo {
+        .map(|(i, (a, built_in))| AgentInfo {
             id: a.id.clone(),
             name: a.name.clone(),
             command: a.command.clone(),
             installed: installed.get(i).copied().unwrap_or(false),
+            built_in: *built_in,
         })
         .collect()
 }
@@ -135,11 +128,12 @@ pub fn add_agent(name: String, command: String) -> Result<Agent, String> {
     if command.trim().is_empty() {
         return Err("command is required".into());
     }
-    let mut cfg = config::load();
-    if cfg.agents.is_empty() {
-        cfg.agents = config::default_agents();
+    let id_base = config::slugify(&name);
+    if config::is_builtin_id(&id_base) {
+        return Err("a built-in agent with this name already exists".into());
     }
-    let id = unique_agent_id(&cfg.agents, &slugify(&name));
+    let mut cfg = config::load();
+    let id = unique_agent_id(&cfg.agents, &id_base);
     let new_agent = Agent {
         id,
         name: name.trim().to_string(),
@@ -152,6 +146,9 @@ pub fn add_agent(name: String, command: String) -> Result<Agent, String> {
 
 #[tauri::command]
 pub fn update_agent(id: String, name: String, command: String) -> Result<(), String> {
+    if config::is_builtin_id(&id) {
+        return Err("built-in agents cannot be modified".into());
+    }
     if name.trim().is_empty() {
         return Err("name is required".into());
     }
@@ -171,6 +168,9 @@ pub fn update_agent(id: String, name: String, command: String) -> Result<(), Str
 
 #[tauri::command]
 pub fn remove_agent(id: String) -> Result<(), String> {
+    if config::is_builtin_id(&id) {
+        return Err("built-in agents cannot be deleted".into());
+    }
     let mut cfg = config::load();
     cfg.agents.retain(|a| a.id != id);
     config::save(&cfg)

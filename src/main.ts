@@ -5,7 +5,6 @@ interface Project {
   name: string;
   path: string;
   agent: string;
-  agentCommand: string | null;
 }
 
 interface AgentInfo {
@@ -13,6 +12,7 @@ interface AgentInfo {
   name: string;
   command: string;
   installed: boolean;
+  builtIn: boolean;
 }
 
 let projects: Project[] = [];
@@ -54,17 +54,20 @@ function renderAgents() {
     return;
   }
   container.innerHTML = agents
-    .map(
-      (a) => `
+    .map((a) => {
+      const actions = a.builtIn
+        ? `<span class="tag-builtIn">built-in</span>`
+        : `<button class="icon-btn edit" data-id="${escapeHtml(a.id)}" title="Edit">✎</button>
+           <button class="icon-btn delete" data-id="${escapeHtml(a.id)}" title="Remove agent">✕</button>`;
+      return `
     <div class="agent-row" data-id="${escapeHtml(a.id)}">
       <span class="status-dot ${a.installed ? "on" : ""}"></span>
       <span class="agent-name">${escapeHtml(a.name)}</span>
       <span class="agent-cmd" title="${escapeHtml(a.command)}">${escapeHtml(a.command)}</span>
       <span class="agent-status ${a.installed ? "on" : ""}">${a.installed ? "installed" : "missing"}</span>
-      <button class="icon-btn edit" data-id="${escapeHtml(a.id)}" title="Edit">✎</button>
-      <button class="icon-btn delete" data-id="${escapeHtml(a.id)}" title="Remove agent">✕</button>
-    </div>`
-    )
+      ${actions}
+    </div>`;
+    })
     .join("");
 }
 
@@ -103,7 +106,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   await refreshAgents();
   await refreshProjects();
 
-  // toggle add forms
   document.getElementById("toggle-add-project")!.addEventListener("click", () => {
     document.getElementById("add-form")!.classList.toggle("hidden");
   });
@@ -112,7 +114,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("agent-form")!.classList.toggle("hidden");
   });
 
-  // project card: click anywhere = launch, delete button = remove
+  // project card: click = launch, delete = remove
   document.getElementById("projects")!.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
     const card = target.closest(".card") as HTMLElement | null;
@@ -137,9 +139,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const name = (document.getElementById("name") as HTMLInputElement).value;
     const path = (document.getElementById("path") as HTMLInputElement).value;
     const agent = (document.getElementById("agent") as HTMLSelectElement).value;
-    const command = (document.getElementById("command") as HTMLInputElement).value;
     try {
-      await invoke("add_project", { name, path, agent, command: command || null });
+      await invoke("add_project", { name, path, agent });
       (e.target as HTMLFormElement).reset();
       await refreshProjects();
     } catch (err) {
@@ -154,8 +155,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!id) return;
     if (target.classList.contains("delete")) {
       if (!confirm("Remove this agent?")) return;
-      await invoke("remove_agent", { id });
-      await refreshAgents();
+      try {
+        await invoke("remove_agent", { id });
+        await refreshAgents();
+      } catch (err) {
+        alert("Remove failed: " + err);
+      }
     } else if (target.classList.contains("edit")) {
       const a = agents.find((x) => x.id === id);
       if (!a) return;

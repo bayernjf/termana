@@ -1,0 +1,10 @@
+# Built-in agent presets.
+# Format: "Display Name" = "launch command"
+# Shipped with termana (embedded at compile time). Users can add their own
+# agents in the app, but these built-in entries cannot be modified or deleted.
+"Claude Code" = "claude"
+"Codex" = "codex"
+"Aider" = "aider"
+"OpenCode" = "opencode"
+"CodeBuddy" = "codebuddy"
+"Pi" = "fengfengfeng"

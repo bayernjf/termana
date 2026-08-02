@@ -291,6 +291,19 @@ body {
   color: var(--accent);
 }
 
+.tag-builtIn {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid var(--border);
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 /* ---- forms ---- */
 .form {
   margin-top: 10px;
