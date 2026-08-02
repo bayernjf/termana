@@ -255,6 +255,16 @@ body {
   background: var(--bg-input);
 }
 
+.card-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.card-actions .icon-btn {
+  margin-left: 0;
+}
+
 /* ---- agents ---- */
 .agents {
   display: flex;
@@ -452,4 +462,63 @@ input.invalid:focus {
 
 .hidden {
   display: none !important;
+}
+
+/* ---- groups ---- */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- checklist (group project picker) ---- */
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.checklist-item:hover {
+  border-color: var(--border-hover);
+}
+
+input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.checklist-name {
+  flex: 1;
+}
+
+.checklist-agent {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--text-dim);
+  font-style: italic;
 }

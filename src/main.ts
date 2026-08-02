@@ -16,9 +16,17 @@ interface AgentInfo {
   builtIn: boolean;
 }
 
+interface Group {
+  id: string;
+  name: string;
+  projectIds: string[];
+}
+
 let projects: Project[] = [];
 let agents: AgentInfo[] = [];
+let groups: Group[] = [];
 let editingAgentId: string | null = null;
+let editingGroupId: string | null = null;
 let pathValid = false;
 
 function escapeHtml(s: string): string {
@@ -45,6 +53,55 @@ function renderProjects() {
       <div class="card-path">${escapeHtml(p.path)}</div>
       <button class="card-launch">Launch ▸</button>
     </div>`
+    )
+    .join("");
+}
+
+function renderGroups() {
+  const container = document.getElementById("groups")!;
+  if (groups.length === 0) {
+    container.innerHTML = `<div class="empty">No groups. Click “+ Add” to create one.</div>`;
+    return;
+  }
+  container.innerHTML = groups
+    .map((g) => {
+      const memberNames = g.projectIds
+        .map((pid) => projects.find((p) => p.id === pid)?.name ?? pid)
+        .join(", ");
+      const members = memberNames
+        ? escapeHtml(memberNames)
+        : `<span class="muted">no projects</span>`;
+      return `
+    <div class="card" data-id="${escapeHtml(g.id)}">
+      <div class="card-head">
+        <div class="card-name">${escapeHtml(g.name)}</div>
+        <span class="chip">${g.projectIds.length} projects</span>
+        <span class="card-actions">
+          <button class="icon-btn edit" data-id="${escapeHtml(g.id)}" title="Edit group">✎</button>
+          <button class="icon-btn delete" data-id="${escapeHtml(g.id)}" title="Remove group">✕</button>
+        </span>
+      </div>
+      <div class="card-path">${members}</div>
+      <button class="card-launch">Launch all ▸</button>
+    </div>`;
+    })
+    .join("");
+}
+
+function renderGroupChecklist(selected: Set<string>) {
+  const container = document.getElementById("group-projects")!;
+  if (projects.length === 0) {
+    container.innerHTML = `<div class="muted">No projects yet. Add projects first.</div>`;
+    return;
+  }
+  container.innerHTML = projects
+    .map(
+      (p) => `
+      <label class="checklist-item">
+        <input type="checkbox" value="${escapeHtml(p.id)}" ${selected.has(p.id) ? "checked" : ""} />
+        <span class="checklist-name">${escapeHtml(p.name)}</span>
+        <span class="checklist-agent">${escapeHtml(p.agent)}</span>
+      </label>`
     )
     .join("");
 }
@@ -95,6 +152,14 @@ function resetAgentForm() {
   document.getElementById("agent-cancel")!.classList.add("hidden");
 }
 
+function resetGroupForm() {
+  editingGroupId = null;
+  (document.getElementById("group-name") as HTMLInputElement).value = "";
+  (document.getElementById("group-submit") as HTMLButtonElement).textContent = "Add group";
+  document.getElementById("group-cancel")!.classList.add("hidden");
+  renderGroupChecklist(new Set());
+}
+
 async function refreshAgents() {
   agents = await invoke<AgentInfo[]>("list_agents");
   renderAgents();
@@ -104,6 +169,11 @@ async function refreshAgents() {
 async function refreshProjects() {
   projects = await invoke<Project[]>("list_projects");
   renderProjects();
+}
+
+async function refreshGroups() {
+  groups = await invoke<Group[]>("list_groups");
+  renderGroups();
 }
 
 async function validatePath() {
@@ -135,9 +205,14 @@ async function validatePath() {
 window.addEventListener("DOMContentLoaded", async () => {
   await refreshAgents();
   await refreshProjects();
+  await refreshGroups();
 
   document.getElementById("toggle-add-project")!.addEventListener("click", () => {
     document.getElementById("add-form")!.classList.toggle("hidden");
+  });
+  document.getElementById("toggle-add-group")!.addEventListener("click", () => {
+    resetGroupForm();
+    document.getElementById("group-form")!.classList.toggle("hidden");
   });
   document.getElementById("toggle-add-agent")!.addEventListener("click", () => {
     resetAgentForm();
@@ -220,6 +295,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (!ok) return;
       await invoke("remove_project", { id });
       await refreshProjects();
+      await refreshGroups();
       return;
     }
     if (target.classList.contains("card-launch")) {
@@ -244,9 +320,80 @@ window.addEventListener("DOMContentLoaded", async () => {
       pathValid = false;
       (document.getElementById("add-project-btn") as HTMLButtonElement).disabled = true;
       await refreshProjects();
+      await refreshGroups();
     } catch (err) {
       await message(String(err), { title: "Add failed", kind: "error" });
     }
+  });
+
+  // group card: ✕ = confirm-remove, ✎ = edit, Launch all ▸ = direct,
+  // card body = confirm-then-launch-all (same as project cards)
+  document.getElementById("groups")!.addEventListener("click", async (e) => {
+    const target = e.target as HTMLElement;
+    const card = target.closest(".card") as HTMLElement | null;
+    if (!card) return;
+    const id = card.getAttribute("data-id");
+    if (!id) return;
+    const launchAll = async () => {
+      try {
+        await invoke("launch_group", { id });
+      } catch (err) {
+        await message(String(err), { title: "Launch failed", kind: "error" });
+      }
+    };
+    if (target.classList.contains("delete")) {
+      const ok = await confirm("Remove this group?", { title: "Remove group", kind: "warning" });
+      if (!ok) return;
+      await invoke("remove_group", { id });
+      await refreshGroups();
+      return;
+    }
+    if (target.classList.contains("edit")) {
+      const g = groups.find((x) => x.id === id);
+      if (!g) return;
+      editingGroupId = id;
+      (document.getElementById("group-name") as HTMLInputElement).value = g.name;
+      renderGroupChecklist(new Set(g.projectIds));
+      (document.getElementById("group-submit") as HTMLButtonElement).textContent = "Update group";
+      document.getElementById("group-cancel")!.classList.remove("hidden");
+      document.getElementById("group-form")!.classList.remove("hidden");
+      return;
+    }
+    if (target.classList.contains("card-launch")) {
+      await launchAll();
+      return;
+    }
+    const g = groups.find((x) => x.id === id);
+    const ok = await confirm(`Launch all in “${g?.name ?? "group"}”?`, { title: "Launch group" });
+    if (!ok) return;
+    await launchAll();
+  });
+
+  document.getElementById("group-form")!.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = (document.getElementById("group-name") as HTMLInputElement).value;
+    const projectIds = [
+      ...document.querySelectorAll<HTMLInputElement>("#group-projects input:checked"),
+    ].map((cb) => cb.value);
+    try {
+      if (editingGroupId) {
+        await invoke("update_group", { id: editingGroupId, name, projectIds });
+        resetGroupForm();
+        document.getElementById("group-form")!.classList.add("hidden");
+      } else {
+        await invoke("add_group", { name, projectIds });
+        (e.target as HTMLFormElement).reset();
+        renderGroupChecklist(new Set());
+      }
+      await refreshGroups();
+    } catch (err) {
+      await message(String(err), { title: "Save failed", kind: "error" });
+    }
+  });
+
+  document.getElementById("group-cancel")!.addEventListener("click", () => {
+    resetGroupForm();
+    document.getElementById("group-form")!.classList.add("hidden");
   });
 
   // agent row: edit / delete

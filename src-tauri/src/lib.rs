@@ -12,11 +12,16 @@ pub fn run() {
             commands::add_project,
             commands::remove_project,
             commands::launch_project,
+            commands::path_exists,
             commands::list_agents,
             commands::add_agent,
             commands::update_agent,
             commands::remove_agent,
-            commands::path_exists,
+            commands::list_groups,
+            commands::add_group,
+            commands::update_group,
+            commands::remove_group,
+            commands::launch_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

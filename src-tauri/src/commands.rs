@@ -1,5 +1,5 @@
 use crate::adapters::{agent, terminal};
-use crate::config::{self, Agent, Project};
+use crate::config::{self, Agent, Group, Project};
 use serde::Serialize;
 use std::path::Path;
 
@@ -31,6 +31,35 @@ fn unique_agent_id(agents: &[Agent], base: &str) -> String {
         n += 1;
     }
     id
+}
+
+fn unique_group_id(groups: &[Group], base: &str) -> String {
+    let mut id = base.to_string();
+    let mut n = 2;
+    while groups.iter().any(|g| g.id == id) {
+        id = format!("{}-{}", base, n);
+        n += 1;
+    }
+    id
+}
+
+/// Resolve a project's agent command and launch it in a new terminal.
+fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
+    let project = cfg
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .ok_or_else(|| format!("project not found: {}", project_id))?;
+    // Resolve: built-in agent > custom agent > raw agent id.
+    let builtins = config::builtin_agents();
+    let command = builtins
+        .iter()
+        .find(|a| a.id == project.agent)
+        .map(|a| a.command.clone())
+        .or_else(|| cfg.agents.iter().find(|a| a.id == project.agent).map(|a| a.command.clone()))
+        .unwrap_or_else(|| project.agent.clone());
+    let term = terminal::default_terminal();
+    term.launch(&project.path, &command)
 }
 
 // ---- projects ----
@@ -71,21 +100,7 @@ pub fn remove_project(id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn launch_project(id: String) -> Result<(), String> {
     let cfg = config::load();
-    let project = cfg
-        .projects
-        .iter()
-        .find(|p| p.id == id)
-        .ok_or_else(|| format!("project not found: {}", id))?;
-    // Resolve: built-in agent > custom agent > raw agent id.
-    let builtins = config::builtin_agents();
-    let command = builtins
-        .iter()
-        .find(|a| a.id == project.agent)
-        .map(|a| a.command.clone())
-        .or_else(|| cfg.agents.iter().find(|a| a.id == project.agent).map(|a| a.command.clone()))
-        .unwrap_or_else(|| project.agent.clone());
-    let term = terminal::default_terminal();
-    term.launch(&project.path, &command)
+    resolve_and_launch(&cfg, &id)
 }
 
 /// Whether a path exists and is a directory (used to validate the project
@@ -102,8 +117,6 @@ pub fn list_agents() -> Vec<AgentInfo> {
     let builtins = config::builtin_agents();
     let builtin_ids: std::collections::HashSet<&str> =
         builtins.iter().map(|a| a.id.as_str()).collect();
-    // Custom agents from config, skipping any whose id collides with a
-    // built-in (e.g. leftovers from an older version that seeded defaults).
     let custom: Vec<Agent> = config::load()
         .agents
         .into_iter()
@@ -184,4 +197,73 @@ pub fn remove_agent(id: String) -> Result<(), String> {
     let mut cfg = config::load();
     cfg.agents.retain(|a| a.id != id);
     config::save(&cfg)
+}
+
+// ---- groups ----
+
+#[tauri::command]
+pub fn list_groups() -> Vec<Group> {
+    config::load().groups
+}
+
+#[tauri::command]
+pub fn add_group(name: String, project_ids: Vec<String>) -> Result<Group, String> {
+    if name.trim().is_empty() {
+        return Err("name is required".into());
+    }
+    let mut cfg = config::load();
+    let id = unique_group_id(&cfg.groups, &config::slugify(&name));
+    let group = Group {
+        id,
+        name: name.trim().to_string(),
+        project_ids,
+    };
+    cfg.groups.push(group.clone());
+    config::save(&cfg)?;
+    Ok(group)
+}
+
+#[tauri::command]
+pub fn update_group(id: String, name: String, project_ids: Vec<String>) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("name is required".into());
+    }
+    let mut cfg = config::load();
+    let target = cfg
+        .groups
+        .iter_mut()
+        .find(|g| g.id == id)
+        .ok_or_else(|| format!("group not found: {}", id))?;
+    target.name = name.trim().to_string();
+    target.project_ids = project_ids;
+    config::save(&cfg)
+}
+
+#[tauri::command]
+pub fn remove_group(id: String) -> Result<(), String> {
+    let mut cfg = config::load();
+    cfg.groups.retain(|g| g.id != id);
+    config::save(&cfg)
+}
+
+/// Launch every project in a group, each in its own terminal window.
+#[tauri::command]
+pub fn launch_group(id: String) -> Result<(), String> {
+    let cfg = config::load();
+    let group = cfg
+        .groups
+        .iter()
+        .find(|g| g.id == id)
+        .ok_or_else(|| format!("group not found: {}", id))?;
+    let mut errors: Vec<String> = Vec::new();
+    for pid in &group.project_ids {
+        if let Err(e) = resolve_and_launch(&cfg, pid) {
+            errors.push(format!("{}: {}", pid, e));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("some projects failed to launch: {}", errors.join("; ")))
+    }
 }

@@ -18,6 +18,14 @@ pub struct Agent {
     pub command: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+    pub project_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
@@ -26,6 +34,8 @@ pub struct Config {
     /// `agents.toml` via `builtin_agents()`, not from here.
     #[serde(default)]
     pub agents: Vec<Agent>,
+    #[serde(default)]
+    pub groups: Vec<Group>,
 }
 
 /// Built-in agent presets, loaded from `agents.toml` (embedded at compile
