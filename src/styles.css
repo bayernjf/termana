@@ -161,7 +161,6 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 16px;
-  cursor: pointer;
   transition: border-color 0.15s, background 0.15s, transform 0.08s;
 }
 
@@ -202,12 +201,19 @@ body {
   color: var(--accent);
   font-size: 12px;
   font-weight: 600;
+  font-family: var(--sans);
   opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
   transition: opacity 0.15s;
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 .card:hover .card-launch {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chip {

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, confirm, message } from "@tauri-apps/plugin-dialog";
 
 interface Project {
   id: string;
@@ -43,7 +43,7 @@ function renderProjects() {
         <button class="icon-btn delete" data-id="${escapeHtml(p.id)}" title="Remove project">✕</button>
       </div>
       <div class="card-path">${escapeHtml(p.path)}</div>
-      <div class="card-launch">Launch ▸</div>
+      <button class="card-launch">Launch ▸</button>
     </div>`
     )
     .join("");
@@ -106,8 +106,6 @@ async function refreshProjects() {
   renderProjects();
 }
 
-// Validate the project path: exists + is a directory. Controls the Add
-// button's disabled state and shows an error message when invalid.
 async function validatePath() {
   const input = document.getElementById("path") as HTMLInputElement;
   const msg = document.getElementById("path-msg")!;
@@ -146,25 +144,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("agent-form")!.classList.toggle("hidden");
   });
 
-  document.getElementById("refresh-agents")!.addEventListener("click", async () => {
-    const btn = document.getElementById("refresh-agents") as HTMLButtonElement;
-    btn.disabled = true;
-    btn.classList.add("spinning");
-    try {
-      await refreshAgents();
-    } finally {
-      btn.classList.remove("spinning");
-      btn.disabled = false;
-    }
-  });
-
   const pathInput = document.getElementById("path") as HTMLInputElement;
   const nameInput = document.getElementById("name") as HTMLInputElement;
   let nameTouched = false;
   let pathDebounce: ReturnType<typeof setTimeout> | undefined;
 
-  // name tracks the path's folder name until the user manually edits it;
-  // clearing the name resumes tracking.
   nameInput.addEventListener("input", () => {
     nameTouched = nameInput.value.trim() !== "";
   });
@@ -180,7 +164,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     await validatePath();
   };
 
-  // folder picker -> fill path, then update name + validate
   document.getElementById("browse-btn")!.addEventListener("click", async () => {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string" && selected.length > 0) {
@@ -189,7 +172,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // update name + validate as the user types (debounced), on blur, on Enter
   const onPathChangedNow = () => {
     clearTimeout(pathDebounce);
     onPathChanged();
@@ -206,24 +188,48 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // project card: click = launch, delete = remove
+  document.getElementById("refresh-agents")!.addEventListener("click", async () => {
+    const btn = document.getElementById("refresh-agents") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      await refreshAgents();
+    } finally {
+      btn.classList.remove("spinning");
+      btn.disabled = false;
+    }
+  });
+
+  // project card: ✕ = confirm-remove, Launch ▸ = direct launch,
+  // card body = confirm-then-launch
   document.getElementById("projects")!.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
     const card = target.closest(".card") as HTMLElement | null;
     if (!card) return;
     const id = card.getAttribute("data-id");
     if (!id) return;
+    const launch = async () => {
+      try {
+        await invoke("launch_project", { id });
+      } catch (err) {
+        await message(String(err), { title: "Launch failed", kind: "error" });
+      }
+    };
     if (target.classList.contains("delete")) {
-      if (!confirm("Remove this project?")) return;
+      const ok = await confirm("Remove this project?", { title: "Remove project", kind: "warning" });
+      if (!ok) return;
       await invoke("remove_project", { id });
       await refreshProjects();
       return;
     }
-    try {
-      await invoke("launch_project", { id });
-    } catch (err) {
-      alert("Launch failed: " + err);
+    if (target.classList.contains("card-launch")) {
+      await launch();
+      return;
     }
+    const p = projects.find((x) => x.id === id);
+    const ok = await confirm(`Launch “${p?.name ?? "project"}”?`, { title: "Launch project" });
+    if (!ok) return;
+    await launch();
   });
 
   document.getElementById("add-form")!.addEventListener("submit", async (e) => {
@@ -239,7 +245,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       (document.getElementById("add-project-btn") as HTMLButtonElement).disabled = true;
       await refreshProjects();
     } catch (err) {
-      alert("Add failed: " + err);
+      await message(String(err), { title: "Add failed", kind: "error" });
     }
   });
 
@@ -249,12 +255,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     const id = target.getAttribute("data-id");
     if (!id) return;
     if (target.classList.contains("delete")) {
-      if (!confirm("Remove this agent?")) return;
+      const ok = await confirm("Remove this agent?", { title: "Remove agent", kind: "warning" });
+      if (!ok) return;
       try {
         await invoke("remove_agent", { id });
         await refreshAgents();
       } catch (err) {
-        alert("Remove failed: " + err);
+        await message(String(err), { title: "Remove failed", kind: "error" });
       }
     } else if (target.classList.contains("edit")) {
       const a = agents.find((x) => x.id === id);
@@ -283,7 +290,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
       await refreshAgents();
     } catch (err) {
-      alert("Agent save failed: " + err);
+      await message(String(err), { title: "Save failed", kind: "error" });
     }
   });
 
