@@ -28,11 +28,13 @@
             <input id="name" placeholder="Project name" required />
           </div>
           <div class="form-row">
+            <button type="button" id="browse-btn" class="btn-ghost">📁 Browse</button>
             <input id="path" placeholder="/absolute/path/to/project" required />
           </div>
+          <div class="path-msg" id="path-msg"></div>
           <div class="form-row">
             <select id="agent"></select>
-            <button type="submit" class="btn-primary">Add project</button>
+            <button type="submit" id="add-project-btn" class="btn-primary" disabled>Add project</button>
           </div>
         </form>
       </section>

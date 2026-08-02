@@ -1,6 +1,7 @@
 use crate::adapters::{agent, terminal};
 use crate::config::{self, Agent, Project};
 use serde::Serialize;
+use std::path::Path;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +88,13 @@ pub fn launch_project(id: String) -> Result<(), String> {
     term.launch(&project.path, &command)
 }
 
+/// Whether a path exists and is a directory (used to validate the project
+/// path in the Add Project form before allowing it to be saved).
+#[tauri::command]
+pub fn path_exists(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
 // ---- agents ----
 
 #[tauri::command]
@@ -94,6 +102,8 @@ pub fn list_agents() -> Vec<AgentInfo> {
     let builtins = config::builtin_agents();
     let builtin_ids: std::collections::HashSet<&str> =
         builtins.iter().map(|a| a.id.as_str()).collect();
+    // Custom agents from config, skipping any whose id collides with a
+    // built-in (e.g. leftovers from an older version that seeded defaults).
     let custom: Vec<Agent> = config::load()
         .agents
         .into_iter()

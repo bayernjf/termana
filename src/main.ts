@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 interface Project {
   id: string;
@@ -18,6 +19,7 @@ interface AgentInfo {
 let projects: Project[] = [];
 let agents: AgentInfo[] = [];
 let editingAgentId: string | null = null;
+let pathValid = false;
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -102,6 +104,34 @@ async function refreshProjects() {
   renderProjects();
 }
 
+// Validate the project path: exists + is a directory. Controls the Add
+// button's disabled state and shows an error message when invalid.
+async function validatePath() {
+  const input = document.getElementById("path") as HTMLInputElement;
+  const msg = document.getElementById("path-msg")!;
+  const addBtn = document.getElementById("add-project-btn") as HTMLButtonElement;
+  const p = input.value.trim();
+  if (p === "") {
+    pathValid = false;
+    input.classList.remove("invalid");
+    msg.textContent = "";
+    addBtn.disabled = true;
+    return;
+  }
+  const exists = await invoke<boolean>("path_exists", { path: p });
+  if (exists) {
+    pathValid = true;
+    input.classList.remove("invalid");
+    msg.textContent = "";
+    addBtn.disabled = false;
+  } else {
+    pathValid = false;
+    input.classList.add("invalid");
+    msg.textContent = "Path does not exist";
+    addBtn.disabled = true;
+  }
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
   await refreshAgents();
   await refreshProjects();
@@ -112,6 +142,54 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("toggle-add-agent")!.addEventListener("click", () => {
     resetAgentForm();
     document.getElementById("agent-form")!.classList.toggle("hidden");
+  });
+
+  const pathInput = document.getElementById("path") as HTMLInputElement;
+  const nameInput = document.getElementById("name") as HTMLInputElement;
+  let nameTouched = false;
+  let pathDebounce: ReturnType<typeof setTimeout> | undefined;
+
+  // name tracks the path's folder name until the user manually edits it;
+  // clearing the name resumes tracking.
+  nameInput.addEventListener("input", () => {
+    nameTouched = nameInput.value.trim() !== "";
+  });
+
+  const fillNameFromPath = () => {
+    if (nameTouched) return;
+    const folderName = pathInput.value.split(/[\\/]/).filter(Boolean).pop() ?? "";
+    nameInput.value = folderName;
+  };
+
+  const onPathChanged = async () => {
+    fillNameFromPath();
+    await validatePath();
+  };
+
+  // folder picker -> fill path, then update name + validate
+  document.getElementById("browse-btn")!.addEventListener("click", async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string" && selected.length > 0) {
+      pathInput.value = selected;
+      await onPathChanged();
+    }
+  });
+
+  // update name + validate as the user types (debounced), on blur, on Enter
+  const onPathChangedNow = () => {
+    clearTimeout(pathDebounce);
+    onPathChanged();
+  };
+  pathInput.addEventListener("input", () => {
+    clearTimeout(pathDebounce);
+    pathDebounce = setTimeout(onPathChanged, 300);
+  });
+  pathInput.addEventListener("blur", onPathChangedNow);
+  pathInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onPathChangedNow();
+    }
   });
 
   // project card: click = launch, delete = remove
@@ -136,12 +214,15 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("add-form")!.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!pathValid) return;
     const name = (document.getElementById("name") as HTMLInputElement).value;
     const path = (document.getElementById("path") as HTMLInputElement).value;
     const agent = (document.getElementById("agent") as HTMLSelectElement).value;
     try {
       await invoke("add_project", { name, path, agent });
       (e.target as HTMLFormElement).reset();
+      pathValid = false;
+      (document.getElementById("add-project-btn") as HTMLButtonElement).disabled = true;
       await refreshProjects();
     } catch (err) {
       alert("Add failed: " + err);
