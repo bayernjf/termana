@@ -1,0 +1,35 @@
+# termana - 迭代记录（CHANGELOG）
+
+> v0 开发阶段的迭代记录。按倒序（最新在上）。详细 commit 见 git log。
+
+## v0.6 - 启动组
+- 新增 **Groups**：把多个项目组成一组，`Launch all ▸` 一键全开（每个项目各开一个终端）。
+- 组卡片复用项目卡片样式（同名 / chip / Launch 提示），编辑 / 删除按钮紧挨。
+- 后端：`Group` 模型（config.toml `[[groups]]`）、`list/add/update/remove_group`、`launch_group`；启动逻辑抽成 `resolve_and_launch` 共用。
+
+## v0.5 - 卡片二次确认 + 原生弹窗
+- **卡片交互**：`Launch ▸` 直接启动；点卡片主体二次确认后启动；`✕` 二次确认删除。
+- **修复弹窗不显示**：Tauri v2 webview 屏蔽同步 `confirm()`/`alert()`，全部改用 `tauri-plugin-dialog` 的异步 `confirm`/`message`，权限 `dialog:default`。
+
+## v0.4 - 手动刷新 + 列对齐
+- Agents 区加 **↻ Refresh** 按钮，手动重新检测安装状态（↻ 旋转反馈）。
+- agent 列表固定列宽：built-in 标签 / 安装状态 / 操作三列跨行对齐。
+- 预设补 OpenCode；Pi 预设命令修正为 `pi`。
+
+## v0.3 - 文件夹选择 + 路径校验 + 自动命名
+- Add Project 加 **📁 Browse** 原生文件夹选择器，选完路径 + 项目名（取文件夹名）自动填充。
+- 路径失焦 / 回车 / 输入停顿 300ms 实时校验是否存在（`path_exists`），不存在红框 + 禁用 Add。
+- 项目名跟随路径，手动改过则锁定。
+- 去掉不再需要的 `agent_command` 覆盖字段。
+
+## v0.2 - built-in 预设文件 + 自定义 agent
+- 新增 **agents.toml**（项目根，纯 key-value `"名称" = "命令"`，`include_str!` 编译期嵌入）作为 built-in 预设。
+- built-in（agents.toml，不可改不可删、标 `built-in`）与自定义 agent（config.toml，增删改）分离。
+- 安装检测硬化：login shell（`$SHELL -ilc` / `Get-Command -CommandType Application`），只认外部命令，不被 shell builtin 误判；匹配终端实际看到的 PATH（fnm/nvm/volta 生效）。
+
+## v0.1 - 初始版本
+- 项目注册表 + agent 绑定（binary 级）+ 一键拉起终端（macOS Terminal.app / Windows PowerShell）。
+- 可配置 agent 列表（增删改）+ 安装检测。
+- 暗色 dev-tool 风格 UI（GitHub Dark 调性，monospace 点缀，状态点，可点击卡片）。
+- 本地优先，TOML 配置持久化。
+- PRD + 技术方案文档；推到 GitHub 公开仓库。

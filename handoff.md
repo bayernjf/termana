@@ -1,6 +1,6 @@
 # termana · Handoff
 
-> Last updated: 2026-08-03. Reflects the state after the `feat: add launch groups` commit.
+> Last updated: 2026-08-03 (docs refresh: PRD / technical design / CHANGELOG / handoff).
 
 ## What it is
 
@@ -82,7 +82,8 @@ src/
 └── styles.css          dark theme
 docs/
 ├── PRD.md
-└── technical-design.md
+├── technical-design.md
+└── CHANGELOG.md
 ```
 
 ### Key flows
@@ -102,10 +103,11 @@ docs/
 ## Git state
 
 - Repo: https://github.com/bayernjf/termana (public)
-- `origin/main` is at the **initial commit**; **8 newer commits are local and not yet pushed** (built-in presets, folder picker, docs, refresh button, column alignment, Pi command, card confirm/async dialogs, launch groups).
+- `origin/main` is at the **initial commit**; **9 newer commits are local and not yet pushed** (built-in presets, folder picker, docs, refresh button, column alignment, Pi command, card confirm/async dialogs, launch groups, handoff doc). Iteration log: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 - Commits follow conventional commits, English messages, authored by `bayernjf` (no AI co-author attribution).
 
 ```
+14b88c1 docs: add handoff document
 a113f2b feat: add launch groups
 32a7fe4 feat(project): confirm card click and direct launch hint
 76728bc chore(agents): set Pi preset command to pi
