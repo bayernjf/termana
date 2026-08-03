@@ -492,6 +492,18 @@ input.invalid:focus {
   letter-spacing: 0.5px;
 }
 
+.ctx-badge.warning {
+  color: #f0b429;
+  border-color: rgba(240, 180, 41, 0.45);
+  background: rgba(240, 180, 41, 0.1);
+}
+
+.ctx-badge.migration {
+  color: #79c0ff;
+  border-color: rgba(121, 192, 255, 0.4);
+  background: rgba(121, 192, 255, 0.08);
+}
+
 .context-bar {
   display: flex;
   align-items: center;
@@ -637,4 +649,22 @@ input[type="checkbox"] {
 .muted {
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* ---- custom tooltip (top-left of cursor) ---- */
+#tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 260px;
+  padding: 5px 9px;
+  background: var(--bg-hover);
+  color: var(--text);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: pre-wrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transform: translate(calc(-100% - 10px), calc(-100% - 10px));
 }

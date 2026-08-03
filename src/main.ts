@@ -7,7 +7,39 @@ interface Project {
   name: string;
   path: string;
   agent: string;
-  context: string | null;
+}
+
+interface ContextStatus {
+  agentsExists: boolean;
+  agentsHasContent: boolean;
+  claudeState: "absent" | "empty" | "linked" | "independent" | "symlink";
+  hasMergeBlock: boolean;
+  divergent: boolean;
+  hasLegacyContext: boolean;
+}
+
+interface ReadContextResult {
+  content: string;
+  source: "agents" | "claude" | "legacy" | "empty" | "merge";
+  agentsRevision: string;
+  claudeRevision: string;
+  legacyRevision: string;
+  requiresClaudeConversion: boolean;
+  hasLegacyContext: boolean;
+}
+
+interface SaveContextResult {
+  claudeAction:
+    | "created"
+    | "already-linked"
+    | "converted"
+    | "independent-kept"
+    | "failed"
+    | "symlink-skip";
+  claudeError: string | null;
+  hasMergeBlock: boolean;
+  legacyMigrated: boolean;
+  legacyError: string | null;
 }
 
 interface AgentInfo {
@@ -25,19 +57,47 @@ interface Group {
 }
 
 let projects: Project[] = [];
+let contextStatuses = new Map<string, ContextStatus>();
 let agents: AgentInfo[] = [];
 let groups: Group[] = [];
 let editingAgentId: string | null = null;
 let editingGroupId: string | null = null;
 let pathValid = false;
 let editingContextProjectId: string | null = null;
+let editingContextSnapshot: ReadContextResult | null = null;
+let contextDirty = false;
+let lastSelectedAgentId: string | null = null;
 
-const CONTEXT_FILES = "AGENTS.md + CLAUDE.md";
+const CONTEXT_FILES = "AGENTS.md (+ CLAUDE.md pointer)";
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string)
   );
+}
+
+const previewRenderer = new marked.Renderer();
+previewRenderer.html = ({ text }) => escapeHtml(text);
+previewRenderer.link = ({ tokens }) => previewRenderer.parser.parseInline(tokens);
+previewRenderer.image = ({ text }) => escapeHtml(`[image: ${text}]`);
+
+function renderContextBadges(projectId: string): string {
+  const status = contextStatuses.get(projectId);
+  if (!status) return "";
+  const badges: string[] = [];
+  if (status.divergent) {
+    badges.push('<span class="ctx-badge warning" title="AGENTS.md and CLAUDE.md differ">divergent</span>');
+  }
+  if (status.hasMergeBlock) {
+    badges.push('<span class="ctx-badge warning" title="AGENTS.md has an unresolved merge block">merge</span>');
+  }
+  if (status.hasLegacyContext) {
+    badges.push('<span class="ctx-badge migration" title="Legacy termana context will be migrated on save">migrate</span>');
+  }
+  if (status.agentsHasContent && badges.length === 0) {
+    badges.push('<span class="ctx-badge" title="AGENTS.md has context">ctx</span>');
+  }
+  return badges.join("");
 }
 
 function renderProjects() {
@@ -53,7 +113,7 @@ function renderProjects() {
       <div class="card-head">
         <div class="card-name">${escapeHtml(p.name)}</div>
         <span class="chip">${escapeHtml(p.agent)}</span>
-        ${p.context ? `<span class="ctx-badge" title="has context -> ${CONTEXT_FILES} (auto-syncs on launch)">ctx</span>` : ""}
+        ${renderContextBadges(p.id)}
         <span class="card-actions">
           <button class="icon-btn context" data-id="${escapeHtml(p.id)}" title="Edit context">✎</button>
           <button class="icon-btn delete" data-id="${escapeHtml(p.id)}" title="Remove project">✕</button>
@@ -151,6 +211,9 @@ function renderAgentOptions() {
       return `<option value="${escapeHtml(a.id)}" ${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");
+  if (lastSelectedAgentId && sorted.some((a) => a.id === lastSelectedAgentId)) {
+    select.value = lastSelectedAgentId;
+  }
 }
 
 function resetAgentForm() {
@@ -170,19 +233,117 @@ function resetGroupForm() {
 }
 
 async function refreshAgents() {
+  const form = document.getElementById("agent-form");
+  const list = document.getElementById("agents-list")!;
+  const inList = !!form && !form.classList.contains("hidden") && form.parentElement === list;
+  if (inList) form!.remove();
   agents = await invoke<AgentInfo[]>("list_agents");
   renderAgents();
   renderAgentOptions();
+  if (inList && form && editingAgentId) {
+    const row = [...list.querySelectorAll(".agent-row")].find(
+      (r) => r.getAttribute("data-id") === editingAgentId
+    );
+    if (row) row.insertAdjacentElement("afterend", form);
+  }
 }
 
 async function refreshProjects() {
+  const contextForm = document.getElementById("context-form");
+  const projectsEl = document.getElementById("projects")!;
+  const inList =
+    !!contextForm &&
+    !contextForm.classList.contains("hidden") &&
+    contextForm.parentElement === projectsEl;
+  if (inList) contextForm!.remove();
   projects = await invoke<Project[]>("list_projects");
+  const statuses = await Promise.all(
+    projects.map(async (project) => {
+      try {
+        return [project.id, await invoke<ContextStatus>("context_status", { projectId: project.id })] as const;
+      } catch {
+        return null;
+      }
+    })
+  );
+  contextStatuses = new Map(statuses.filter((item): item is readonly [string, ContextStatus] => item !== null));
   renderProjects();
+  if (inList && contextForm && editingContextProjectId) {
+    const card = [...document.querySelectorAll("#projects .card")].find(
+      (c) => c.getAttribute("data-id") === editingContextProjectId
+    );
+    if (card) card.insertAdjacentElement("afterend", contextForm);
+  }
+}
+
+function showContextMode(mode: "edit" | "preview") {
+  document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((tab) =>
+    tab.classList.toggle("active", tab.dataset.mode === mode)
+  );
+  const text = document.getElementById("context-text") as HTMLTextAreaElement;
+  const preview = document.getElementById("context-preview")!;
+  if (mode === "preview") {
+    preview.innerHTML = marked.parse(text.value, { renderer: previewRenderer }) as string;
+    text.classList.add("hidden");
+    preview.classList.remove("hidden");
+  } else {
+    text.classList.remove("hidden");
+    preview.classList.add("hidden");
+  }
+}
+
+async function loadContextEditor(projectId: string) {
+  const project = projects.find((item) => item.id === projectId);
+  const snapshot = await invoke<ReadContextResult>("read_context", { projectId });
+  editingContextProjectId = projectId;
+  editingContextSnapshot = snapshot;
+  contextDirty = false;
+  (document.getElementById("context-text") as HTMLTextAreaElement).value = snapshot.content;
+  document.getElementById("context-project-label")!.textContent =
+    `${project?.name ?? "project"} · ${project?.agent ?? ""} -> ${CONTEXT_FILES}`;
+  showContextMode("edit");
+  const form = document.getElementById("context-form")!;
+  form.classList.remove("hidden");
+  const targetCard = [...document.querySelectorAll("#projects .card")].find(
+    (c) => c.getAttribute("data-id") === projectId
+  );
+  if (targetCard) targetCard.insertAdjacentElement("afterend", form);
+}
+
+async function discardContextChanges(): Promise<boolean> {
+  if (!contextDirty) return true;
+  return confirm("Discard unsaved context changes?", {
+    title: "Unsaved changes",
+    kind: "warning",
+  });
+}
+
+function closeContextEditor() {
+  editingContextProjectId = null;
+  editingContextSnapshot = null;
+  contextDirty = false;
+  const cf = document.getElementById("context-form");
+  if (cf) {
+    cf.classList.add("hidden");
+    if (cf.parentElement === document.getElementById("projects")) {
+      document.getElementById("projects")!.after(cf);
+    }
+  }
 }
 
 async function refreshGroups() {
+  const form = document.getElementById("group-form");
+  const list = document.getElementById("groups")!;
+  const inList = !!form && !form.classList.contains("hidden") && form.parentElement === list;
+  if (inList) form!.remove();
   groups = await invoke<Group[]>("list_groups");
   renderGroups();
+  if (inList && form && editingGroupId) {
+    const card = [...list.querySelectorAll(".card")].find(
+      (c) => c.getAttribute("data-id") === editingGroupId
+    );
+    if (card) card.insertAdjacentElement("afterend", form);
+  }
 }
 
 async function validatePath() {
@@ -221,7 +382,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   document.getElementById("toggle-add-group")!.addEventListener("click", () => {
     resetGroupForm();
-    document.getElementById("group-form")!.classList.toggle("hidden");
+    const form = document.getElementById("group-form")!;
+    document.getElementById("groups")!.before(form);
+    form.classList.toggle("hidden");
   });
   document.getElementById("toggle-add-agent")!.addEventListener("click", () => {
     resetAgentForm();
@@ -308,20 +471,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     if (target.classList.contains("context")) {
-      editingContextProjectId = id;
-      const p = projects.find((x) => x.id === id);
+      if (!(await discardContextChanges())) return;
       try {
-        const ctx = await invoke<string>("get_context", { projectId: id });
-        const textEl = document.getElementById("context-text") as HTMLTextAreaElement;
-        textEl.value = ctx;
-        document.getElementById("context-project-label")!.textContent =
-          `${p?.name ?? "project"} · ${p?.agent ?? ""} -> ${CONTEXT_FILES}`;
-        textEl.classList.remove("hidden");
-        document.getElementById("context-preview")!.classList.add("hidden");
-        document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((t) =>
-          t.classList.toggle("active", t.dataset.mode === "edit")
-        );
-        document.getElementById("context-form")!.classList.remove("hidden");
+        await loadContextEditor(id);
       } catch (err) {
         await message(String(err), { title: "Load failed", kind: "error" });
       }
@@ -345,8 +497,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const agent = (document.getElementById("agent") as HTMLSelectElement).value;
     try {
       await invoke("add_project", { name, path, agent });
-      (e.target as HTMLFormElement).reset();
+      lastSelectedAgentId = agent;
+      (document.getElementById("name") as HTMLInputElement).value = "";
+      (document.getElementById("path") as HTMLInputElement).value = "";
       pathValid = false;
+      nameTouched = false;
       (document.getElementById("add-project-btn") as HTMLButtonElement).disabled = true;
       await refreshProjects();
       await refreshGroups();
@@ -355,58 +510,82 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // context editor: save / sync / cancel
+  (document.getElementById("agent") as HTMLSelectElement).addEventListener("change", (e) => {
+    lastSelectedAgentId = (e.target as HTMLSelectElement).value;
+  });
+
+  // context editor: save / cancel
   document.getElementById("context-form")!.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!editingContextProjectId) return;
+    if (!editingContextProjectId || !editingContextSnapshot) return;
+    const projectId = editingContextProjectId;
+    const snapshot = editingContextSnapshot;
     const context = (document.getElementById("context-text") as HTMLTextAreaElement).value;
+    let convertClaude = false;
+    if (snapshot.requiresClaudeConversion) {
+      convertClaude = await confirm(
+        "CLAUDE.md contains independent content. Link it to AGENTS.md after saving? Cancel keeps CLAUDE.md unchanged.",
+        { title: "Link CLAUDE.md", kind: "warning" }
+      );
+    }
     try {
-      await invoke("set_context", { projectId: editingContextProjectId, context });
-      await message("Context saved.", { title: "Saved" });
+      const result = await invoke<SaveContextResult>("save_context", {
+        projectId,
+        content: context,
+        expectedAgentsRevision: snapshot.agentsRevision,
+        expectedClaudeRevision: snapshot.claudeRevision,
+        expectedLegacyRevision: snapshot.legacyRevision,
+        convertClaude,
+        migrateLegacy: snapshot.hasLegacyContext,
+      });
+      const notices = ["AGENTS.md saved."];
+      let warning = false;
+      if (result.claudeAction === "created") notices.push("CLAUDE.md now links to AGENTS.md.");
+      if (result.claudeAction === "converted") notices.push("CLAUDE.md was converted to an AGENTS.md pointer.");
+      if (result.claudeAction === "independent-kept") {
+        notices.push("CLAUDE.md remains independent.");
+        warning = true;
+      }
+      if (result.claudeAction === "symlink-skip") {
+        notices.push("CLAUDE.md is a symlink and was left unchanged.");
+      }
+      if (result.claudeError) {
+        notices.push(`CLAUDE.md was not updated: ${result.claudeError}`);
+        warning = true;
+      }
+      if (result.legacyMigrated) notices.push("Legacy termana context was migrated.");
+      if (result.legacyError) {
+        notices.push(`Legacy context was retained: ${result.legacyError}`);
+        warning = true;
+      }
+      if (result.hasMergeBlock) {
+        notices.push("An unresolved merge block remains in AGENTS.md.");
+        warning = true;
+      }
+      await loadContextEditor(projectId);
+      await refreshProjects();
+      await message(notices.join("\n\n"), {
+        title: warning ? "Saved with warnings" : "Saved",
+        kind: warning ? "warning" : "info",
+      });
     } catch (err) {
       await message(String(err), { title: "Save failed", kind: "error" });
     }
   });
 
-  document.getElementById("context-sync")!.addEventListener("click", async () => {
-    if (!editingContextProjectId) return;
-    const context = (document.getElementById("context-text") as HTMLTextAreaElement).value;
-    try {
-      await invoke("set_context", { projectId: editingContextProjectId, context });
-      const ok = await confirm(
-        "Sync writes the agent context file into the project directory, overwriting if it exists. Continue?",
-        { title: "Sync context", kind: "warning" }
-      );
-      if (!ok) return;
-      const written = await invoke<string[]>("sync_context", { projectId: editingContextProjectId });
-      await message(`Synced to ${written.join(", ")}`, { title: "Synced" });
-    } catch (err) {
-      await message(String(err), { title: "Sync failed", kind: "error" });
-    }
+  document.getElementById("context-text")!.addEventListener("input", () => {
+    contextDirty = true;
   });
 
-  document.getElementById("context-cancel")!.addEventListener("click", () => {
-    editingContextProjectId = null;
-    document.getElementById("context-form")!.classList.add("hidden");
+  document.getElementById("context-cancel")!.addEventListener("click", async () => {
+    if (!(await discardContextChanges())) return;
+    closeContextEditor();
   });
 
-  // context editor: edit / preview tabs (preview renders markdown via marked)
+  // context editor: edit / preview tabs
   document.querySelectorAll<HTMLButtonElement>("#context-form .tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      const mode = tab.dataset.mode;
-      document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((t) =>
-        t.classList.toggle("active", t === tab)
-      );
-      const text = document.getElementById("context-text") as HTMLTextAreaElement;
-      const preview = document.getElementById("context-preview")!;
-      if (mode === "preview") {
-        preview.innerHTML = marked.parse(text.value) as string;
-        text.classList.add("hidden");
-        preview.classList.remove("hidden");
-      } else {
-        text.classList.remove("hidden");
-        preview.classList.add("hidden");
-      }
+      showContextMode(tab.dataset.mode === "preview" ? "preview" : "edit");
     });
   });
 
@@ -440,7 +619,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       renderGroupChecklist(new Set(g.projectIds));
       (document.getElementById("group-submit") as HTMLButtonElement).textContent = "Update group";
       document.getElementById("group-cancel")!.classList.remove("hidden");
-      document.getElementById("group-form")!.classList.remove("hidden");
+      const form = document.getElementById("group-form")!;
+      form.classList.remove("hidden");
+      const card = [...document.querySelectorAll("#groups .card")].find(
+        (c) => c.getAttribute("data-id") === id
+      );
+      if (card) card.insertAdjacentElement("afterend", form);
       return;
     }
     if (target.classList.contains("card-launch")) {
@@ -463,7 +647,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (editingGroupId) {
         await invoke("update_group", { id: editingGroupId, name, projectIds });
         resetGroupForm();
-        document.getElementById("group-form")!.classList.add("hidden");
+        const form = document.getElementById("group-form")!;
+        form.classList.add("hidden");
+        document.getElementById("groups")!.before(form);
       } else {
         await invoke("add_group", { name, projectIds });
         (e.target as HTMLFormElement).reset();
@@ -477,7 +663,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("group-cancel")!.addEventListener("click", () => {
     resetGroupForm();
-    document.getElementById("group-form")!.classList.add("hidden");
+    const form = document.getElementById("group-form")!;
+    form.classList.add("hidden");
+    document.getElementById("groups")!.before(form);
   });
 
   // agent row: edit / delete
@@ -502,7 +690,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       (document.getElementById("agent-command") as HTMLInputElement).value = a.command;
       (document.getElementById("agent-submit") as HTMLButtonElement).textContent = "Update agent";
       document.getElementById("agent-cancel")!.classList.remove("hidden");
-      document.getElementById("agent-form")!.classList.remove("hidden");
+      const form = document.getElementById("agent-form")!;
+      form.classList.remove("hidden");
+      const row = [...document.querySelectorAll("#agents-list .agent-row")].find(
+        (r) => r.getAttribute("data-id") === id
+      );
+      if (row) row.insertAdjacentElement("afterend", form);
     }
   });
 
@@ -514,7 +707,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (editingAgentId) {
         await invoke("update_agent", { id: editingAgentId, name, command });
         resetAgentForm();
-        document.getElementById("agent-form")!.classList.add("hidden");
+        const form = document.getElementById("agent-form")!;
+        form.classList.add("hidden");
+        document.getElementById("agents-list")!.after(form);
       } else {
         await invoke("add_agent", { name, command });
         (e.target as HTMLFormElement).reset();
@@ -527,6 +722,45 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("agent-cancel")!.addEventListener("click", () => {
     resetAgentForm();
-    document.getElementById("agent-form")!.classList.add("hidden");
+    const form = document.getElementById("agent-form")!;
+    form.classList.add("hidden");
+    document.getElementById("agents-list")!.after(form);
+  });
+
+  // custom tooltip: replaces native title and pins to the top-left of the cursor
+  const tooltip = document.createElement("div");
+  tooltip.id = "tooltip";
+  tooltip.classList.add("hidden");
+  document.body.appendChild(tooltip);
+
+  const positionTooltip = (e: MouseEvent) => {
+    tooltip.style.left = `${e.clientX}px`;
+    tooltip.style.top = `${e.clientY}px`;
+  };
+
+  document.addEventListener("mouseover", (e) => {
+    const el = (e.target as HTMLElement).closest("[title]") as HTMLElement | null;
+    if (!el) return;
+    const text = el.getAttribute("title");
+    if (!text) return;
+    el.dataset.tooltip = text;
+    el.removeAttribute("title");
+    tooltip.textContent = text;
+    tooltip.classList.remove("hidden");
+    positionTooltip(e as MouseEvent);
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!tooltip.classList.contains("hidden")) positionTooltip(e);
+  });
+
+  document.addEventListener("mouseout", (e) => {
+    const el = (e.target as HTMLElement).closest("[data-tooltip]") as HTMLElement | null;
+    if (!el) return;
+    const related = e.relatedTarget as Node | null;
+    if (related && el.contains(related)) return;
+    el.setAttribute("title", el.dataset.tooltip ?? "");
+    delete el.dataset.tooltip;
+    tooltip.classList.add("hidden");
   });
 });
