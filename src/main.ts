@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, confirm, message } from "@tauri-apps/plugin-dialog";
+import { marked } from "marked";
 
 interface Project {
   id: string;
@@ -311,9 +312,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       const p = projects.find((x) => x.id === id);
       try {
         const ctx = await invoke<string>("get_context", { projectId: id });
-        (document.getElementById("context-text") as HTMLTextAreaElement).value = ctx;
+        const textEl = document.getElementById("context-text") as HTMLTextAreaElement;
+        textEl.value = ctx;
         document.getElementById("context-project-label")!.textContent =
           `${p?.name ?? "project"} · ${p?.agent ?? ""} -> ${CONTEXT_FILES}`;
+        textEl.classList.remove("hidden");
+        document.getElementById("context-preview")!.classList.add("hidden");
+        document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((t) =>
+          t.classList.toggle("active", t.dataset.mode === "edit")
+        );
         document.getElementById("context-form")!.classList.remove("hidden");
       } catch (err) {
         await message(String(err), { title: "Load failed", kind: "error" });
@@ -381,6 +388,26 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("context-cancel")!.addEventListener("click", () => {
     editingContextProjectId = null;
     document.getElementById("context-form")!.classList.add("hidden");
+  });
+
+  // context editor: edit / preview tabs (preview renders markdown via marked)
+  document.querySelectorAll<HTMLButtonElement>("#context-form .tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const mode = tab.dataset.mode;
+      document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((t) =>
+        t.classList.toggle("active", t === tab)
+      );
+      const text = document.getElementById("context-text") as HTMLTextAreaElement;
+      const preview = document.getElementById("context-preview")!;
+      if (mode === "preview") {
+        preview.innerHTML = marked.parse(text.value) as string;
+        text.classList.add("hidden");
+        preview.classList.remove("hidden");
+      } else {
+        text.classList.remove("hidden");
+        preview.classList.add("hidden");
+      }
+    });
   });
 
   // group card: ✕ = confirm-remove, ✎ = edit, Launch all ▸ = direct,

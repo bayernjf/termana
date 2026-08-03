@@ -38,10 +38,15 @@
           </div>
         </form>
         <form id="context-form" class="form hidden">
-          <div class="form-row">
+          <div class="context-bar">
+            <div class="context-tabs">
+              <button type="button" class="tab active" data-mode="edit">编辑</button>
+              <button type="button" class="tab" data-mode="preview">预览</button>
+            </div>
             <span id="context-project-label" class="context-label"></span>
           </div>
           <textarea id="context-text" class="context-text" placeholder="Agent-neutral project context: architecture, conventions, commands, gotchas..."></textarea>
+          <div id="context-preview" class="context-preview hidden"></div>
           <div class="form-row">
             <button type="submit" class="btn-primary">Save</button>
             <button type="button" class="btn-ghost" id="context-sync">Sync to agent file</button>
