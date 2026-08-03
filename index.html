@@ -37,6 +37,17 @@
             <button type="submit" id="add-project-btn" class="btn-primary" disabled>Add project</button>
           </div>
         </form>
+        <form id="context-form" class="form hidden">
+          <div class="form-row">
+            <span id="context-project-label" class="context-label"></span>
+          </div>
+          <textarea id="context-text" class="context-text" placeholder="Agent-neutral project context: architecture, conventions, commands, gotchas..."></textarea>
+          <div class="form-row">
+            <button type="submit" class="btn-primary">Save</button>
+            <button type="button" class="btn-ghost" id="context-sync">Sync to agent file</button>
+            <button type="button" class="btn-ghost" id="context-cancel">Cancel</button>
+          </div>
+        </form>
       </section>
 
       <section class="section">

@@ -8,6 +8,10 @@ pub struct Project {
     pub name: String,
     pub path: String,
     pub agent: String,
+    /// Agent-neutral context (markdown). Source of truth; synced to the
+    /// bound agent's context file (CLAUDE.md / AGENTS.md / ...) on demand.
+    #[serde(default)]
+    pub context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

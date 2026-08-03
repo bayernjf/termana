@@ -6,6 +6,7 @@ interface Project {
   name: string;
   path: string;
   agent: string;
+  context: string | null;
 }
 
 interface AgentInfo {
@@ -28,6 +29,13 @@ let groups: Group[] = [];
 let editingAgentId: string | null = null;
 let editingGroupId: string | null = null;
 let pathValid = false;
+let editingContextProjectId: string | null = null;
+
+function contextFileFor(agent: string): string {
+  if (agent === "claude") return "CLAUDE.md";
+  if (agent === "aider") return "CONVENTIONS.md";
+  return "AGENTS.md";
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -48,7 +56,11 @@ function renderProjects() {
       <div class="card-head">
         <div class="card-name">${escapeHtml(p.name)}</div>
         <span class="chip">${escapeHtml(p.agent)}</span>
-        <button class="icon-btn delete" data-id="${escapeHtml(p.id)}" title="Remove project">✕</button>
+        ${p.context ? `<span class="ctx-badge" title="has context -> ${contextFileFor(p.agent)} (auto-syncs on launch)">ctx</span>` : ""}
+        <span class="card-actions">
+          <button class="icon-btn context" data-id="${escapeHtml(p.id)}" title="Edit context">✎</button>
+          <button class="icon-btn delete" data-id="${escapeHtml(p.id)}" title="Remove project">✕</button>
+        </span>
       </div>
       <div class="card-path">${escapeHtml(p.path)}</div>
       <button class="card-launch">Launch ▸</button>
@@ -298,6 +310,20 @@ window.addEventListener("DOMContentLoaded", async () => {
       await refreshGroups();
       return;
     }
+    if (target.classList.contains("context")) {
+      editingContextProjectId = id;
+      const p = projects.find((x) => x.id === id);
+      try {
+        const ctx = await invoke<string>("get_context", { projectId: id });
+        (document.getElementById("context-text") as HTMLTextAreaElement).value = ctx;
+        document.getElementById("context-project-label")!.textContent =
+          `${p?.name ?? "project"} · ${p?.agent ?? ""} -> ${contextFileFor(p?.agent ?? "")}`;
+        document.getElementById("context-form")!.classList.remove("hidden");
+      } catch (err) {
+        await message(String(err), { title: "Load failed", kind: "error" });
+      }
+      return;
+    }
     if (target.classList.contains("card-launch")) {
       await launch();
       return;
@@ -324,6 +350,41 @@ window.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       await message(String(err), { title: "Add failed", kind: "error" });
     }
+  });
+
+  // context editor: save / sync / cancel
+  document.getElementById("context-form")!.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!editingContextProjectId) return;
+    const context = (document.getElementById("context-text") as HTMLTextAreaElement).value;
+    try {
+      await invoke("set_context", { projectId: editingContextProjectId, context });
+      await message("Context saved.", { title: "Saved" });
+    } catch (err) {
+      await message(String(err), { title: "Save failed", kind: "error" });
+    }
+  });
+
+  document.getElementById("context-sync")!.addEventListener("click", async () => {
+    if (!editingContextProjectId) return;
+    const context = (document.getElementById("context-text") as HTMLTextAreaElement).value;
+    try {
+      await invoke("set_context", { projectId: editingContextProjectId, context });
+      const ok = await confirm(
+        "Sync writes the agent context file into the project directory, overwriting if it exists. Continue?",
+        { title: "Sync context", kind: "warning" }
+      );
+      if (!ok) return;
+      const written = await invoke<string>("sync_context", { projectId: editingContextProjectId });
+      await message(`Synced to ${written}`, { title: "Synced" });
+    } catch (err) {
+      await message(String(err), { title: "Sync failed", kind: "error" });
+    }
+  });
+
+  document.getElementById("context-cancel")!.addEventListener("click", () => {
+    editingContextProjectId = null;
+    document.getElementById("context-form")!.classList.add("hidden");
   });
 
   // group card: ✕ = confirm-remove, ✎ = edit, Launch all ▸ = direct,
