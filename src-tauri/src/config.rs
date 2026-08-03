@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,10 +9,10 @@ pub struct Project {
     pub name: String,
     pub path: String,
     pub agent: String,
-    /// Agent-neutral context (markdown). Source of truth; synced to the
-    /// bound agent's context file (CLAUDE.md / AGENTS.md / ...) on demand.
-    #[serde(default)]
-    pub context: Option<String>,
+    /// Read-only migration source from the pre-v1 sync model. New context is
+    /// stored in AGENTS.md; this value is cleared after a successful save.
+    #[serde(default, rename = "context", skip_serializing_if = "Option::is_none")]
+    pub legacy_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,8 +49,7 @@ pub struct Config {
 /// `"Display Name" = "command"`.
 pub fn builtin_agents() -> Vec<Agent> {
     let raw = include_str!("../../agents.toml");
-    let map: std::collections::HashMap<String, String> =
-        toml::from_str(raw).unwrap_or_default();
+    let map: std::collections::HashMap<String, String> = toml::from_str(raw).unwrap_or_default();
     let mut agents: Vec<Agent> = map
         .into_iter()
         .map(|(name, command)| Agent {
@@ -59,7 +59,7 @@ pub fn builtin_agents() -> Vec<Agent> {
         })
         .collect();
     // Deterministic order (HashMap iteration is random).
-    agents.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    agents.sort_by_key(|agent| agent.name.to_lowercase());
     agents
 }
 
@@ -103,5 +103,15 @@ pub fn save(cfg: &Config) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let s = toml::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(path, s).map_err(|e| e.to_string())
+    let parent = path
+        .parent()
+        .ok_or_else(|| "config path has no parent directory".to_string())?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".termana-config-")
+        .tempfile_in(parent)
+        .map_err(|e| e.to_string())?;
+    temp.write_all(s.as_bytes()).map_err(|e| e.to_string())?;
+    temp.as_file().sync_all().map_err(|e| e.to_string())?;
+    temp.persist(&path).map_err(|e| e.error.to_string())?;
+    Ok(())
 }

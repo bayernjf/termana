@@ -6,6 +6,7 @@ use std::process::Stdio;
 /// setup from rc / profile files (fnm, nvm, asdf, volta, ...) is applied:
 ///   - unix:    `$SHELL -ilc` (login interactive, sources .zprofile + .zshrc)
 ///   - windows: `powershell -Command` (loads the PowerShell profile)
+///
 /// A plain `which` / `where` would miss tools whose PATH is set only in an
 /// rc or profile -- especially when termana runs as a GUI app (no rc
 /// sourced).
