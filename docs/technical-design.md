@@ -135,8 +135,9 @@ context_file = "termana.context.md"   # 归一化上下文源
 - 路径带空格：macOS 用 AppleScript `quoted form of`；Windows 由 `powershell -Command` + 单引号处理。
 
 ## 8. 已建 vs 规划
-- **已建（v0）**：项目管理（文件夹选择 + 路径校验 + 自动命名）、agent 绑定（built-in + 自定义）、启动组、一键启动（确认 / 直接）、安装检测（登录 shell + 手动刷新）、原生弹窗、macOS / Windows 终端启动、面板 UI。Rust + 前端均编译通过。
-- **规划 v1**：上下文归一化（写一次，emit `CLAUDE.md` / `AGENTS.md` / `.codex` / `.cursorrules`）、配置绑定深化（model / 权限 / MCP）。
+- **已建（v0）**：项目管理（文件夹选择 + 路径校验 + 自动命名）、agent 绑定（built-in + 自定义）、启动组、一键启动（确认 / 直接）、安装检测（登录 shell + 手动刷新）、原生弹窗、macOS / Windows 终端启动、面板 UI。
+- **已建（v1 增量）**：上下文归一化--per-project agent-neutral context（`Project.context`）+ 手动 `sync_context` + 启动自动 sync（`resolve_and_launch` 内 `write_context_file`，best-effort）+ `ctx` 徽章。`context_file_for` 映射 agent->文件（claude->CLAUDE.md 等）。
+- **规划 v1 余下**：配置绑定深化（model / 权限 / MCP）、多格式 emit（一份 context 写多个 agent 文件）。
 - **规划 v2**：跨 agent 可观测、agent 接力。
 
 ## 9. 关键决策 / 踩坑
