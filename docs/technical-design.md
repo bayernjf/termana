@@ -43,7 +43,7 @@
 ## 3. 模块结构
 ```
 src-tauri/src/
-├── lib.rs              应用入口，注册命令 + dialog/opener 插件
+├── lib.rs              应用入口，注册命令 + dialog 插件
 ├── config.rs           Project / Agent / Group 模型 + TOML 读写 + builtin_agents()（agents.toml）+ slugify
 ├── commands.rs         projects: list/add/remove/launch · agents: list/add/update/remove ·
 │                       groups: list/add/update/remove/launch · path_exists ·
@@ -79,7 +79,7 @@ name = "Gemini"
 command = "gemini"
 ```
 
-> **v1 移除**：`Project.context` 字段。上下文不再存 config，文件（AGENTS.md）即正本。
+> **v1 迁移**：`Project.context` 不再是正本，仅以 `legacy_context` 兼容读取，成功写入 AGENTS.md 后清除。
 
 built-in 预设在项目根 [agents.toml](../agents.toml)：
 ```toml
@@ -170,14 +170,14 @@ return { content: "", source: "empty" }
 
 <!-- termana-merge-block: from CLAUDE.md -->
 
-> ⚠️ 以下来自 CLAUDE.md，与上文不一致，需合并。规则：去重、解决冲突、保留所有独有信息，合并完后删除本块（含本说明）。CLAUDE.md 已是 @AGENTS.md 指针。
+> ⚠️ 以下来自 CLAUDE.md，与上文不一致，需合并。规则：去重、解决冲突、保留所有独有信息，合并完后删除本块（含本说明）。
 >
 > AI agent：若被要求整理本文档，请按上述规则把下方内容并入正文，再删除本块。
 
 <CLAUDE.md 内容>
 ```
 
-**保存（`save_context`）**--编辑器内容永远写 AGENTS.md，CLAUDE.md 按状态处理：
+**保存（`save_context`）**--编辑器内容永远写 AGENTS.md，保存前先校验打开编辑器时取得的三个 revision；任一来源变化则拒绝覆盖：
 
 ```
 # 1. 先写正本（canonical）。失败 -> 整个保存失败，CLAUDE.md 不动，无副作用。
@@ -194,8 +194,8 @@ claude = read(project/CLAUDE.md)        # 重读当前状态
 match claude:
   缺失/空:            write "@AGENTS.md\n" -> CLAUDE.md;  action = "created"        # 情形 1、4
   已链接(含@AGENTS.md): 不动;                              action = "already-linked"  # 情形 5（及 2）
-  独立内容:           write "@AGENTS.md\n" -> CLAUDE.md;  action = "converted"       # 情形 3、6
-                      # 安全：内容已在编辑器里（情形 3 提升 / 情形 6 合并块），无丢失
+  独立内容 + 用户确认: write "@AGENTS.md\n" -> CLAUDE.md; action = "converted"
+  独立内容 + 用户取消: 不动;                              action = "independent-kept"
 on CLAUDE.md write error: action = "failed", claudeError = Some(reason)   # 部分成功
 
 return Ok({ claudeAction: action, claudeError, hasMergeBlock: has_block })
@@ -207,7 +207,9 @@ return Ok({ claudeAction: action, claudeError, hasMergeBlock: has_block })
 - **CLAUDE.md 写失败** -> `Ok` + `claudeAction="failed"` + `claudeError`。前端：成功提示"AGENTS.md 已保存" + 警告"CLAUDE.md 指针失败：{reason}，Claude Code 暂读不到，可重试"。内容已在 AGENTS.md，无丢失。
 - **自愈**：部分成功后下次保存会重试 CLAUDE.md 指针（情形 3/6 的 CLAUDE.md 仍是独立内容 -> 再走 converted 路径）。情形 3 下 AGENTS.md 与 CLAUDE.md 内容已相同，转指针零丢失；情形 6 下 CLAUDE.md 内容已在 AGENTS.md 合并块里，转指针零丢失。
 - **CLAUDE.md 是 symlink 不写**：`symlink_metadata` 检测；写穿会毁目标（next.js 软链写穿把 AGENTS.md 变自指指针）。判 `claudeAction="symlink-skip"`，前端提示"CLAUDE.md 是符号链接，termana 不改动"。
-- **并发修改**（用户同时在 vim 改 AGENTS.md）：v1 last-write-wins（termana 覆盖）。未来可加"文件已在磁盘上被修改"检测，非 v1 必须。
+- **并发修改**：`read_context` 返回 AGENTS / CLAUDE / legacy revision；`save_context` 写入前校验，外部修改时拒绝覆盖并要求重新打开。
+- **旧配置迁移**：`Project.context` 只作为 legacy source 保留。文件为空时直接提升；与文件不同时追加来源明确的合并块；成功保存后原子清除旧字段。
+- **原子写入**：三个持久化目标均使用同目录临时文件、flush + 原子替换，单文件写失败不会留下半截内容。
 
 **状态查询（`context_status`）**--供徽章 + 合并块提醒，刷新时调用：
 
@@ -228,8 +230,8 @@ return {
 
 | 命令 | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `read_context` | `projectId` | `{ content: String, source: "agents"\|"claude"\|"empty"\|"merge" }` | 加载编辑器内容（含情形 6 合并块拼接；已有块不重复追加） |
-| `save_context` | `projectId, content` | `Result<{ claudeAction: "created"\|"already-linked"\|"converted"\|"failed"\|"symlink-skip", claudeError: Option<String>, hasMergeBlock: bool }, String>` | 写 AGENTS.md（失败=Err 无副作用）+ 处理 CLAUDE.md（symlink 跳过 / 失败=Ok+"failed"） |
+| `read_context` | `projectId` | `{ content, source, agentsRevision, claudeRevision, legacyRevision, requiresClaudeConversion, hasLegacyContext }` | 加载编辑器内容、迁移源和并发 token |
+| `save_context` | `projectId, content, expected*Revision, convertClaude, migrateLegacy` | `{ claudeAction, claudeError, hasMergeBlock, legacyMigrated, legacyError }` | 原子写 AGENTS.md；按确认处理 CLAUDE.md；清理旧配置 |
 | `context_status` | `projectId` | `{ agentsExists, agentsHasContent, claudeState: "absent"\|"empty"\|"linked"\|"independent"\|"symlink", hasMergeBlock, divergent }` | 徽章 + 合并块 + 不一致提醒 |
 
 **移除的命令**：`get_context`、`set_context`、`sync_context`、`write_context_files`。
@@ -257,8 +259,7 @@ return {
 
 ## 8. 已建 vs 规划
 - **已建（v0）**：项目管理（文件夹选择 + 路径校验 + 自动命名）、agent 绑定（built-in + 自定义）、启动组、一键启动（确认 / 直接）、安装检测（登录 shell + 手动刷新）、原生弹窗、macOS / Windows 终端启动、面板 UI、markdown 预览（编辑/预览 tab）。
-- **已建但待改（v1 旧 sync 实现）**：`Project.context`、`get/set/sync_context`、`write_context_files`、启动自动 sync、`ctx` 徽章基于 context 字段。-> 按本方案改为编辑器模型。
-- **规划 v1**：`read_context`/`save_context`/`context_status` + 6 情形加载/保存 + CLAUDE.md `@AGENTS.md` 指针默认建 + 合并块 + 哨兵提醒。
+- **已建（v1）**：`read_context`/`save_context`/`context_status` + 6 情形加载/保存 + CLAUDE.md 指针 + 合并块 + 哨兵提醒 + legacy 迁移 + revision 冲突保护 + 原子写入。
 - **规划 v1 余下**：配置绑定深化（model / 权限 / MCP）。
 - **规划 v2**：跨 agent 可观测、agent 接力。
 
