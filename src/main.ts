@@ -31,11 +31,7 @@ let editingGroupId: string | null = null;
 let pathValid = false;
 let editingContextProjectId: string | null = null;
 
-function contextFileFor(agent: string): string {
-  if (agent === "claude") return "CLAUDE.md";
-  if (agent === "aider") return "CONVENTIONS.md";
-  return "AGENTS.md";
-}
+const CONTEXT_FILES = "AGENTS.md + CLAUDE.md";
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -56,7 +52,7 @@ function renderProjects() {
       <div class="card-head">
         <div class="card-name">${escapeHtml(p.name)}</div>
         <span class="chip">${escapeHtml(p.agent)}</span>
-        ${p.context ? `<span class="ctx-badge" title="has context -> ${contextFileFor(p.agent)} (auto-syncs on launch)">ctx</span>` : ""}
+        ${p.context ? `<span class="ctx-badge" title="has context -> ${CONTEXT_FILES} (auto-syncs on launch)">ctx</span>` : ""}
         <span class="card-actions">
           <button class="icon-btn context" data-id="${escapeHtml(p.id)}" title="Edit context">✎</button>
           <button class="icon-btn delete" data-id="${escapeHtml(p.id)}" title="Remove project">✕</button>
@@ -317,7 +313,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const ctx = await invoke<string>("get_context", { projectId: id });
         (document.getElementById("context-text") as HTMLTextAreaElement).value = ctx;
         document.getElementById("context-project-label")!.textContent =
-          `${p?.name ?? "project"} · ${p?.agent ?? ""} -> ${contextFileFor(p?.agent ?? "")}`;
+          `${p?.name ?? "project"} · ${p?.agent ?? ""} -> ${CONTEXT_FILES}`;
         document.getElementById("context-form")!.classList.remove("hidden");
       } catch (err) {
         await message(String(err), { title: "Load failed", kind: "error" });
@@ -375,8 +371,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         { title: "Sync context", kind: "warning" }
       );
       if (!ok) return;
-      const written = await invoke<string>("sync_context", { projectId: editingContextProjectId });
-      await message(`Synced to ${written}`, { title: "Synced" });
+      const written = await invoke<string[]>("sync_context", { projectId: editingContextProjectId });
+      await message(`Synced to ${written.join(", ")}`, { title: "Synced" });
     } catch (err) {
       await message(String(err), { title: "Sync failed", kind: "error" });
     }
