@@ -135,6 +135,10 @@ function renderProjects() {
     return;
   }
   const manual = projectSortMode === "manual";
+  // The single most recently launched project earns the “上次启动” flag.
+  const latestId = projects
+    .filter((p) => p.lastLaunched)
+    .sort((a, b) => (b.lastLaunched ?? 0) - (a.lastLaunched ?? 0))[0]?.id;
   container.innerHTML = sortProjects(projects)
     .map(
       (p) => `
@@ -144,6 +148,8 @@ function renderProjects() {
         <div class="card-name">${escapeHtml(p.name)}</div>
         <span class="chip">${escapeHtml(p.agent)}</span>
         ${renderContextBadges(p.id)}
+        ${p.launchCount > 0 ? `<span class="chip count" title="Launch count">⟳ ${p.launchCount}</span>` : ""}
+        ${p.id === latestId ? `<span class="ctx-badge last-launch" title="上次启动：${p.lastLaunched ? new Date(p.lastLaunched).toLocaleString() : ""}">上次启动</span>` : ""}
         <span class="card-actions">
           <button class="icon-btn context" data-id="${escapeHtml(p.id)}" title="Edit context">✎</button>
           <button class="icon-btn delete" data-id="${escapeHtml(p.id)}" title="Remove project">✕</button>
@@ -287,6 +293,8 @@ async function refreshProjects() {
     contextForm.parentElement === projectsEl;
   if (inList) contextForm!.remove();
   projects = await invoke<Project[]>("list_projects");
+  const countEl = document.getElementById("project-count");
+  if (countEl) countEl.textContent = `项目数量：${projects.length}`;
   const statuses = await Promise.all(
     projects.map(async (project) => {
       try {
@@ -488,6 +496,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const launch = async () => {
       try {
         await invoke("launch_project", { id });
+        await refreshProjects();
       } catch (err) {
         await message(String(err), { title: "Launch failed", kind: "error" });
       }

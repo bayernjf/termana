@@ -735,3 +735,15 @@ input[type="checkbox"] {
   background: var(--accent-dim);
   opacity: 0.6;
 }
+
+.chip.count {
+  color: var(--text-muted);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.ctx-badge.last-launch {
+  color: #7ee787;
+  border-color: rgba(126, 231, 135, 0.45);
+  background: rgba(126, 231, 135, 0.1);
+}
