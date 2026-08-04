@@ -13,6 +13,15 @@ pub struct Project {
     /// stored in AGENTS.md; this value is cleared after a successful save.
     #[serde(default, rename = "context", skip_serializing_if = "Option::is_none")]
     pub legacy_context: Option<String>,
+    /// Epoch millis when the project was added. 0 for pre-v1 configs.
+    #[serde(default)]
+    pub created_at: i64,
+    /// Epoch millis of the last launch, if any.
+    #[serde(default)]
+    pub last_launched: Option<i64>,
+    /// Number of times the project has been launched.
+    #[serde(default)]
+    pub launch_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

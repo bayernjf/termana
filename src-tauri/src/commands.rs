@@ -44,6 +44,14 @@ fn unique_group_id(groups: &[Group], base: &str) -> String {
     id
 }
 
+/// Current time as epoch millis.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Resolve a project's agent command and launch it in a new terminal.
 fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
     let project = cfg
@@ -91,6 +99,9 @@ pub fn add_project(name: String, path: String, agent: String) -> Result<Project,
         path: path.trim().to_string(),
         agent,
         legacy_context: None,
+        created_at: now(),
+        last_launched: None,
+        launch_count: 0,
     };
     cfg.projects.push(project.clone());
     config::save(&cfg)?;
@@ -106,7 +117,12 @@ pub fn remove_project(id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn launch_project(id: String) -> Result<(), String> {
-    let cfg = config::load();
+    let mut cfg = config::load();
+    if let Some(p) = cfg.projects.iter_mut().find(|p| p.id == id) {
+        p.last_launched = Some(now());
+        p.launch_count += 1;
+    }
+    config::save(&cfg)?;
     resolve_and_launch(&cfg, &id)
 }
 
@@ -685,6 +701,9 @@ mod tests {
             path: root.path().to_string_lossy().into_owned(),
             agent: "codex".to_string(),
             legacy_context: legacy_context.map(str::to_string),
+            created_at: 0,
+            last_launched: None,
+            launch_count: 0,
         }
     }
 
