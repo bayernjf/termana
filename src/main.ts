@@ -71,6 +71,7 @@ let editingContextSnapshot: ReadContextResult | null = null;
 let contextDirty = false;
 let lastSelectedAgentId: string | null = null;
 let projectSortMode: string = localStorage.getItem("termana.projectSort") ?? "manual";
+let projectAgentFilter: string = localStorage.getItem("termana.projectAgentFilter") ?? "all";
 
 const CONTEXT_FILES = "AGENTS.md (+ CLAUDE.md pointer)";
 
@@ -128,18 +129,66 @@ function sortProjects(list: Project[]): Project[] {
   return copy;
 }
 
+function agentLabel(agentId: string): string {
+  return agents.find((a) => a.id === agentId)?.name ?? agentId;
+}
+
+function filterProjects(list: Project[]): Project[] {
+  if (projectAgentFilter === "all") return list;
+  return list.filter((p) => p.agent === projectAgentFilter);
+}
+
+// Counts per agent, most projects first; a filtered-on agent stays listed at zero.
+function agentFilterCounts(): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const p of projects) counts.set(p.agent, (counts.get(p.agent) ?? 0) + 1);
+  if (projectAgentFilter !== "all" && !counts.has(projectAgentFilter)) {
+    counts.set(projectAgentFilter, 0);
+  }
+  return [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || agentLabel(a[0]).localeCompare(agentLabel(b[0]))
+  );
+}
+
+function renderAgentFilter() {
+  const btn = document.getElementById("agent-filter-btn");
+  const menu = document.getElementById("agent-filter-menu");
+  if (!btn || !menu) return;
+  const active = projectAgentFilter !== "all";
+  btn.textContent = `Agent：${active ? agentLabel(projectAgentFilter) : "全部"} ▾`;
+  btn.classList.toggle("active", active);
+  const entries: [string, number][] = [["all", projects.length], ...agentFilterCounts()];
+  menu.innerHTML = entries
+    .map(
+      ([id, count]) => `
+      <button type="button" class="filter-item ${id === projectAgentFilter ? "active" : ""}" data-agent="${escapeHtml(id)}">
+        <span>${escapeHtml(id === "all" ? "全部" : agentLabel(id))}</span>
+        <span class="filter-item-count">${count}</span>
+      </button>`
+    )
+    .join("");
+}
+
 function renderProjects() {
   const container = document.getElementById("projects")!;
+  const visible = filterProjects(projects);
+  const countEl = document.getElementById("project-count");
+  if (countEl) countEl.textContent = `项目数量：${visible.length}`;
   if (projects.length === 0) {
     container.innerHTML = `<div class="empty">No projects yet. Click “+ Add” to create one.</div>`;
     return;
   }
-  const manual = projectSortMode === "manual";
+  if (visible.length === 0) {
+    container.innerHTML = `<div class="empty">No projects for “${escapeHtml(agentLabel(projectAgentFilter))}”.</div>`;
+    return;
+  }
+  // Reordering a filtered list would drop the hidden projects, so drag is manual-and-unfiltered only.
+  const manual = projectSortMode === "manual" && projectAgentFilter === "all";
   // The single most recently launched project earns the “上次启动” flag.
   const latestId = projects
     .filter((p) => p.lastLaunched)
     .sort((a, b) => (b.lastLaunched ?? 0) - (a.lastLaunched ?? 0))[0]?.id;
-  container.innerHTML = sortProjects(projects)
+  container.innerHTML = sortProjects(visible)
     .map(
       (p) => `
     <div class="card" data-id="${escapeHtml(p.id)}">
@@ -276,6 +325,7 @@ async function refreshAgents() {
   agents = await invoke<AgentInfo[]>("list_agents");
   renderAgents();
   renderAgentOptions();
+  renderAgentFilter();
   if (inList && form && editingAgentId) {
     const row = [...list.querySelectorAll(".agent-row")].find(
       (r) => r.getAttribute("data-id") === editingAgentId
@@ -293,8 +343,6 @@ async function refreshProjects() {
     contextForm.parentElement === projectsEl;
   if (inList) contextForm!.remove();
   projects = await invoke<Project[]>("list_projects");
-  const countEl = document.getElementById("project-count");
-  if (countEl) countEl.textContent = `项目数量：${projects.length}`;
   const statuses = await Promise.all(
     projects.map(async (project) => {
       try {
@@ -305,6 +353,7 @@ async function refreshProjects() {
     })
   );
   contextStatuses = new Map(statuses.filter((item): item is readonly [string, ContextStatus] => item !== null));
+  renderAgentFilter();
   renderProjects();
   if (inList && contextForm && editingContextProjectId) {
     const card = [...document.querySelectorAll("#projects .card")].find(
@@ -570,6 +619,35 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   updateSortButtons();
 
+  // agent filter dropdown ("全部" + one entry per agent, with project counts)
+  const filterBtn = document.getElementById("agent-filter-btn")!;
+  const filterMenu = document.getElementById("agent-filter-menu")!;
+
+  const closeFilterMenu = () => filterMenu.classList.add("hidden");
+
+  filterBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    filterMenu.classList.toggle("hidden");
+  });
+
+  filterMenu.addEventListener("click", (e) => {
+    const item = (e.target as HTMLElement).closest(".filter-item") as HTMLElement | null;
+    if (!item) return;
+    projectAgentFilter = item.dataset.agent!;
+    localStorage.setItem("termana.projectAgentFilter", projectAgentFilter);
+    closeFilterMenu();
+    renderAgentFilter();
+    renderProjects();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest("#agent-filter")) closeFilterMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeFilterMenu();
+  });
+
   // project drag-to-reorder (manual order) — floating ghost + placeholder
   const projectsEl = document.getElementById("projects")!;
   let dragId: string | null = null;
@@ -580,7 +658,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   let offsetY = 0;
 
   projectsEl.addEventListener("pointerdown", (e) => {
-    if (projectSortMode !== "manual") return;
+    if (projectSortMode !== "manual" || projectAgentFilter !== "all") return;
     const handle = (e.target as HTMLElement).closest(".drag-handle") as HTMLElement | null;
     if (!handle) return;
     const card = handle.closest(".card") as HTMLElement | null;

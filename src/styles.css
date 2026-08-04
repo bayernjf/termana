@@ -704,6 +704,94 @@ input[type="checkbox"] {
   font-size: 12px;
 }
 
+/* ---- agent filter dropdown ---- */
+.agent-filter {
+  position: relative;
+}
+
+.filter-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.filter-btn:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+}
+
+.filter-btn.active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-dim);
+}
+
+.filter-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 180px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.filter-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.filter-item:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.filter-item.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.filter-item-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 0 7px;
+  border-radius: 999px;
+}
+
+.filter-item.active .filter-item-count {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+}
+
 .drag-handle {
   cursor: grab;
   color: var(--text-dim);
