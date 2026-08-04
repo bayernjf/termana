@@ -126,6 +126,26 @@ pub fn launch_project(id: String) -> Result<(), String> {
     resolve_and_launch(&cfg, &id)
 }
 
+/// Persist a manual ordering of projects by id. Ids not present in
+/// `ordered_ids` are appended in their previous relative order.
+#[tauri::command]
+pub fn reorder_projects(ordered_ids: Vec<String>) -> Result<(), String> {
+    let mut cfg = config::load();
+    let mut by_id: std::collections::HashMap<String, config::Project> =
+        cfg.projects.into_iter().map(|p| (p.id.clone(), p)).collect();
+    let mut ordered: Vec<config::Project> = Vec::with_capacity(ordered_ids.len());
+    for id in &ordered_ids {
+        if let Some(p) = by_id.remove(id) {
+            ordered.push(p);
+        }
+    }
+    for p in by_id.into_values() {
+        ordered.push(p);
+    }
+    cfg.projects = ordered;
+    config::save(&cfg)
+}
+
 // ---- context (v1: AGENTS.md is canonical) ----
 
 const AGENTS_FILE: &str = "AGENTS.md";

@@ -22,6 +22,13 @@
           <h2 class="section-title">Projects</h2>
           <button class="link-btn" id="toggle-add-project">+ Add</button>
         </div>
+        <div class="sort-bar" id="project-sort">
+          <button class="sort-btn" data-mode="manual" data-label="自定义">自定义</button>
+          <button class="sort-btn" data-mode="name" data-label="首字母">首字母</button>
+          <button class="sort-btn" data-mode="added" data-label="添加日期">添加日期</button>
+          <button class="sort-btn" data-mode="recent" data-label="最近">最近</button>
+          <span class="sort-count" id="project-count"></span>
+        </div>
         <form id="add-form" class="form hidden">
           <div class="form-row">
             <input id="name" placeholder="Project name" required />

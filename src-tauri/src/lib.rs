@@ -11,6 +11,7 @@ pub fn run() {
             commands::add_project,
             commands::remove_project,
             commands::launch_project,
+            commands::reorder_projects,
             commands::read_context,
             commands::save_context,
             commands::context_status,

@@ -7,6 +7,9 @@ interface Project {
   name: string;
   path: string;
   agent: string;
+  createdAt: number;
+  lastLaunched: number | null;
+  launchCount: number;
 }
 
 interface ContextStatus {
@@ -67,6 +70,7 @@ let editingContextProjectId: string | null = null;
 let editingContextSnapshot: ReadContextResult | null = null;
 let contextDirty = false;
 let lastSelectedAgentId: string | null = null;
+let projectSortMode: string = localStorage.getItem("termana.projectSort") ?? "manual";
 
 const CONTEXT_FILES = "AGENTS.md (+ CLAUDE.md pointer)";
 
@@ -100,17 +104,43 @@ function renderContextBadges(projectId: string): string {
   return badges.join("");
 }
 
+function sortProjects(list: Project[]): Project[] {
+  const mode = projectSortMode;
+  if (mode === "manual") return list;
+  const copy = [...list];
+  switch (mode) {
+    case "name-asc":
+      copy.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      break;
+    case "name-desc":
+      copy.sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: "base" }));
+      break;
+    case "added-asc":
+      copy.sort((a, b) => a.createdAt - b.createdAt);
+      break;
+    case "added-desc":
+      copy.sort((a, b) => b.createdAt - a.createdAt);
+      break;
+    case "recent":
+      copy.sort((a, b) => (b.lastLaunched ?? 0) - (a.lastLaunched ?? 0));
+      break;
+  }
+  return copy;
+}
+
 function renderProjects() {
   const container = document.getElementById("projects")!;
   if (projects.length === 0) {
     container.innerHTML = `<div class="empty">No projects yet. Click “+ Add” to create one.</div>`;
     return;
   }
-  container.innerHTML = projects
+  const manual = projectSortMode === "manual";
+  container.innerHTML = sortProjects(projects)
     .map(
       (p) => `
     <div class="card" data-id="${escapeHtml(p.id)}">
       <div class="card-head">
+        ${manual ? '<span class="drag-handle" title="Drag to reorder">⠿</span>' : ""}
         <div class="card-name">${escapeHtml(p.name)}</div>
         <span class="chip">${escapeHtml(p.agent)}</span>
         ${renderContextBadges(p.id)}
@@ -488,6 +518,133 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!ok) return;
     await launch();
   });
+
+  // project sort mode (left-to-right buttons; name/added toggle asc/desc)
+  const sortBar = document.getElementById("project-sort")!;
+
+  const updateSortButtons = () => {
+    sortBar.querySelectorAll<HTMLElement>(".sort-btn").forEach((btn) => {
+      const mode = btn.dataset.mode!;
+      let active = false;
+      let dir = "";
+      if (mode === "manual") active = projectSortMode === "manual";
+      else if (mode === "recent") active = projectSortMode === "recent";
+      else if (mode === "name") {
+        active = projectSortMode === "name-asc" || projectSortMode === "name-desc";
+        dir = projectSortMode === "name-asc" ? " ↑" : " ↓";
+      } else if (mode === "added") {
+        active = projectSortMode === "added-asc" || projectSortMode === "added-desc";
+        dir = projectSortMode === "added-asc" ? " ↑" : " ↓";
+      }
+      btn.classList.toggle("active", active);
+      btn.textContent = (btn.dataset.label ?? mode) + dir;
+    });
+  };
+
+  sortBar.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest(".sort-btn") as HTMLElement | null;
+    if (!btn) return;
+    const mode = btn.dataset.mode!;
+    if (mode === "name" || mode === "added") {
+      if (mode === "name") {
+        projectSortMode = projectSortMode === "name-asc" ? "name-desc" : "name-asc";
+      } else {
+        projectSortMode = projectSortMode === "added-asc" ? "added-desc" : "added-asc";
+      }
+    } else {
+      projectSortMode = mode;
+    }
+    localStorage.setItem("termana.projectSort", projectSortMode);
+    updateSortButtons();
+    renderProjects();
+  });
+
+  updateSortButtons();
+
+  // project drag-to-reorder (manual order) — floating ghost + placeholder
+  const projectsEl = document.getElementById("projects")!;
+  let dragId: string | null = null;
+  let dragOriginal: HTMLElement | null = null;
+  let dragClone: HTMLElement | null = null;
+  let dragPlaceholder: HTMLElement | null = null;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  projectsEl.addEventListener("pointerdown", (e) => {
+    if (projectSortMode !== "manual") return;
+    const handle = (e.target as HTMLElement).closest(".drag-handle") as HTMLElement | null;
+    if (!handle) return;
+    const card = handle.closest(".card") as HTMLElement | null;
+    if (!card) return;
+    e.preventDefault();
+    dragId = card.getAttribute("data-id");
+    dragOriginal = card;
+    const rect = card.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+
+    dragClone = card.cloneNode(true) as HTMLElement;
+    dragClone.classList.add("drag-clone");
+    dragClone.style.width = `${rect.width}px`;
+    dragClone.style.height = `${rect.height}px`;
+    dragClone.style.left = `${rect.left}px`;
+    dragClone.style.top = `${rect.top}px`;
+    document.body.appendChild(dragClone);
+
+    dragPlaceholder = document.createElement("div");
+    dragPlaceholder.className = "drag-placeholder";
+    dragPlaceholder.style.height = `${rect.height}px`;
+    projectsEl.insertBefore(dragPlaceholder, card);
+    card.style.display = "none";
+    handle.setPointerCapture(e.pointerId);
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!dragId || !dragClone || !dragPlaceholder) return;
+    dragClone.style.left = `${e.clientX - offsetX}px`;
+    dragClone.style.top = `${e.clientY - offsetY}px`;
+    const cards = [...projectsEl.querySelectorAll(".card")].filter(
+      (c) => (c as HTMLElement).style.display !== "none"
+    ) as HTMLElement[];
+    let inserted = false;
+    for (const c of cards) {
+      const box = c.getBoundingClientRect();
+      if (e.clientY < box.top + box.height / 2) {
+        projectsEl.insertBefore(dragPlaceholder, c);
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) projectsEl.appendChild(dragPlaceholder);
+  });
+
+  const finishDrag = () => {
+    if (!dragId) return;
+    dragClone?.remove();
+    if (dragPlaceholder && dragOriginal) {
+      dragPlaceholder.replaceWith(dragOriginal);
+      dragOriginal.style.display = "";
+    } else {
+      dragPlaceholder?.remove();
+    }
+    const orderedIds = [...projectsEl.querySelectorAll(".card")]
+      .map((c) => c.getAttribute("data-id"))
+      .filter((id): id is string => !!id);
+    const byId = new Map(projects.map((pr) => [pr.id, pr]));
+    projects = orderedIds.map((id) => byId.get(id)!).filter((pr): pr is Project => !!pr);
+    dragId = null;
+    dragOriginal = null;
+    dragClone = null;
+    dragPlaceholder = null;
+    invoke("reorder_projects", { orderedIds }).catch(() => {});
+    projectSortMode = "manual";
+    localStorage.setItem("termana.projectSort", projectSortMode);
+    updateSortButtons();
+    renderProjects();
+  };
+
+  window.addEventListener("pointerup", finishDrag);
+  window.addEventListener("pointercancel", finishDrag);
 
   document.getElementById("add-form")!.addEventListener("submit", async (e) => {
     e.preventDefault();
