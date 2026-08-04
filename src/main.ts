@@ -900,8 +900,28 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.body.appendChild(tooltip);
 
   const positionTooltip = (e: MouseEvent) => {
-    tooltip.style.left = `${e.clientX}px`;
-    tooltip.style.top = `${e.clientY}px`;
+    const pad = 10;
+    const w = tooltip.offsetWidth;
+    const h = tooltip.offsetHeight;
+    let left = e.clientX - pad - w;
+    let top = e.clientY - pad - h;
+    if (left < pad) left = e.clientX + pad;
+    if (top < pad) top = e.clientY + pad;
+    left = Math.min(Math.max(left, pad), window.innerWidth - w - pad);
+    top = Math.min(Math.max(top, pad), window.innerHeight - h - pad);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  };
+
+  let tooltipOwner: HTMLElement | null = null;
+
+  const hideTooltip = () => {
+    if (tooltipOwner) {
+      tooltipOwner.setAttribute("title", tooltipOwner.dataset.tooltip ?? "");
+      delete tooltipOwner.dataset.tooltip;
+      tooltipOwner = null;
+    }
+    tooltip.classList.add("hidden");
   };
 
   document.addEventListener("mouseover", (e) => {
@@ -909,15 +929,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!el) return;
     const text = el.getAttribute("title");
     if (!text) return;
+    if (tooltipOwner && tooltipOwner !== el) hideTooltip();
     el.dataset.tooltip = text;
     el.removeAttribute("title");
+    tooltipOwner = el;
     tooltip.textContent = text;
     tooltip.classList.remove("hidden");
     positionTooltip(e as MouseEvent);
   });
 
   document.addEventListener("mousemove", (e) => {
-    if (!tooltip.classList.contains("hidden")) positionTooltip(e);
+    if (tooltip.classList.contains("hidden")) return;
+    // the hovered element can vanish without ever firing mouseout: a drag hides it,
+    // or a re-render replaces the node. Drop the tooltip once it is no longer rendered.
+    if (!tooltipOwner?.isConnected || tooltipOwner.getClientRects().length === 0) {
+      hideTooltip();
+      return;
+    }
+    positionTooltip(e);
   });
 
   document.addEventListener("mouseout", (e) => {
@@ -925,8 +954,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!el) return;
     const related = e.relatedTarget as Node | null;
     if (related && el.contains(related)) return;
-    el.setAttribute("title", el.dataset.tooltip ?? "");
-    delete el.dataset.tooltip;
-    tooltip.classList.add("hidden");
+    hideTooltip();
   });
+
+  // a press starts a drag/click that may hide or re-render the hovered element
+  document.addEventListener("pointerdown", hideTooltip);
 });
