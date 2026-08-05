@@ -17,9 +17,14 @@
         <p class="tagline">terminal projects · one click to launch</p>
       </header>
 
-      <section class="section">
+      <nav class="tabs" id="main-tabs">
+        <button type="button" class="tab-btn active" data-tab="projects">Projects</button>
+        <button type="button" class="tab-btn" data-tab="groups">Groups</button>
+        <button type="button" class="tab-btn" data-tab="agents">Agents</button>
+      </nav>
+
+      <section class="section panel" data-panel="projects">
         <div class="section-head">
-          <h2 class="section-title">Projects</h2>
           <button class="link-btn" id="toggle-add-project">+ Add</button>
         </div>
         <div class="sort-bar" id="project-sort">
@@ -65,9 +70,8 @@
         </form>
       </section>
 
-      <section class="section">
+      <section class="section panel hidden" data-panel="groups">
         <div class="section-head">
-          <h2 class="section-title">Groups</h2>
           <button class="link-btn" id="toggle-add-group">+ Add</button>
         </div>
         <form id="group-form" class="form hidden">
@@ -83,11 +87,9 @@
         <div id="groups" class="groups"></div>
       </section>
 
-      <section class="section">
+      <section class="section panel hidden" data-panel="agents">
         <div class="section-head">
-          <h2 class="section-title">
-            Agents <span class="section-hint">detected on your PATH</span>
-          </h2>
+          <span class="section-hint">detected on your PATH</span>
           <div class="section-actions">
             <button class="link-btn" id="refresh-agents" title="Re-detect installed agents"><span class="spin-icon">↻</span> Refresh</button>
             <button class="link-btn" id="toggle-add-agent">+ Add</button>

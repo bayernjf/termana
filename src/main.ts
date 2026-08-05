@@ -72,6 +72,7 @@ let contextDirty = false;
 let lastSelectedAgentId: string | null = null;
 let projectSortMode: string = localStorage.getItem("termana.projectSort") ?? "manual";
 let projectAgentFilter: string = localStorage.getItem("termana.projectAgentFilter") ?? "all";
+let activeTab: string = localStorage.getItem("termana.activeTab") ?? "projects";
 
 const CONTEXT_FILES = "AGENTS.md (+ CLAUDE.md pointer)";
 
@@ -136,6 +137,16 @@ function agentLabel(agentId: string): string {
 function filterProjects(list: Project[]): Project[] {
   if (projectAgentFilter === "all") return list;
   return list.filter((p) => p.agent === projectAgentFilter);
+}
+
+function applyTab(tab: string) {
+  activeTab = tab;
+  document.querySelectorAll<HTMLButtonElement>("#main-tabs .tab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  });
+  document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.panel !== tab);
+  });
 }
 
 // Counts per agent, most projects first; a filtered-on agent stays listed at zero.
@@ -460,6 +471,16 @@ async function validatePath() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  applyTab(activeTab);
+  document.getElementById("main-tabs")!.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest(".tab-btn") as HTMLElement | null;
+    if (!btn) return;
+    const tab = btn.dataset.tab!;
+    if (tab === activeTab) return;
+    applyTab(tab);
+    localStorage.setItem("termana.activeTab", tab);
+  });
+
   await refreshAgents();
   await refreshProjects();
   await refreshGroups();
