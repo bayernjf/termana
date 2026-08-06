@@ -1,9 +1,10 @@
 use std::process::Command;
 
 /// A terminal knows how to open a new window, cd into a directory,
-/// and run a command in it.
+/// and run a command in it. `title` sets the window/tab title so the
+/// user can tell which project a window belongs to.
 pub trait TerminalAdapter {
-    fn launch(&self, dir: &str, command: &str) -> Result<(), String>;
+    fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String>;
 }
 
 #[cfg(target_os = "macos")]
@@ -19,15 +20,23 @@ fn escape_applescript(s: &str) -> String {
 
 #[cfg(target_os = "macos")]
 impl TerminalAdapter for MacTerminal {
-    fn launch(&self, dir: &str, command: &str) -> Result<(), String> {
+    fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String> {
         // `do script` sends the text to a new interactive Terminal window.
         // `quoted form of` wraps the path in shell-safe single quotes so
         // spaces and odd characters don't break the cd. After the agent
         // exits, the shell remains open in the project directory.
+        //
+        // Set the window/tab title via Terminal.app's native `custom title`
+        // property so the user can see which project a window belongs to.
+        // We capture the tab returned by `do script` and set its custom
+        // title explicitly — this is more robust than an OSC escape
+        // sequence (which the agent's TUI would immediately overwrite).
+        // `quoted form of` wraps the path in shell-safe single quotes.
         let script = format!(
-            "tell application \"Terminal\"\nactivate\ndo script \"cd \" & quoted form of \"{}\" & \" && {}\"\nend tell",
+            "tell application \"Terminal\"\nactivate\nset newTab to do script (\"cd \" & quoted form of \"{}\" & \" && {}\")\nset custom title of newTab to \"{}\"\nend tell",
             escape_applescript(dir),
-            escape_applescript(command)
+            escape_applescript(command),
+            escape_applescript(title)
         );
         let output = Command::new("osascript")
             .arg("-e")
@@ -43,7 +52,7 @@ impl TerminalAdapter for MacTerminal {
 
 #[cfg(target_os = "windows")]
 impl TerminalAdapter for WindowsPowerShell {
-    fn launch(&self, dir: &str, command: &str) -> Result<(), String> {
+    fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         // CREATE_NEW_CONSOLE: give the process its own window (termana is a
         // GUI app with no console of its own).
@@ -51,8 +60,14 @@ impl TerminalAdapter for WindowsPowerShell {
         // No -NoProfile: let the PowerShell profile load so the environment
         // matches the user's normal terminal (fnm / volta PATH, etc.).
         // -NoExit: keep the window open after the agent exits.
-        // Single-quote the path; double any embedded single quote.
-        let ps_command = format!("Set-Location '{}'; {}", dir.replace('\'', "''"), command);
+        // Set the window title first so the user can identify the project;
+        // escape single quotes in the title by doubling them.
+        let ps_command = format!(
+            "$Host.UI.RawUI.WindowTitle = '{}'; Set-Location '{}'; {}",
+            title.replace('\'', "''"),
+            dir.replace('\'', "''"),
+            command
+        );
         Command::new("powershell")
             .arg("-NoExit")
             .arg("-Command")

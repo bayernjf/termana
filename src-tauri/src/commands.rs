@@ -60,20 +60,22 @@ fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), Stri
         .find(|p| p.id == project_id)
         .ok_or_else(|| format!("project not found: {}", project_id))?;
     // Resolve: built-in agent > custom agent > raw agent id.
-    let builtins = config::builtin_agents();
-    let command = builtins
+    let (command, agent_name) = config::builtin_agents()
         .iter()
         .find(|a| a.id == project.agent)
-        .map(|a| a.command.clone())
+        .map(|a| (a.command.clone(), a.name.clone()))
         .or_else(|| {
             cfg.agents
                 .iter()
                 .find(|a| a.id == project.agent)
-                .map(|a| a.command.clone())
+                .map(|a| (a.command.clone(), a.name.clone()))
         })
-        .unwrap_or_else(|| project.agent.clone());
+        .unwrap_or_else(|| (project.agent.clone(), project.agent.clone()));
+    // Window/tab title: "project — agent" so the user can identify the
+    // project even after the agent changes its own title in the TUI.
+    let title = format!("{} — {}", project.name, agent_name);
     let term = terminal::default_terminal();
-    term.launch(&project.path, &command)
+    term.launch(&title, &project.path, &command)
 }
 
 // ---- projects ----
