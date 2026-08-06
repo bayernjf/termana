@@ -21,22 +21,30 @@ fn escape_applescript(s: &str) -> String {
 #[cfg(target_os = "macos")]
 impl TerminalAdapter for MacTerminal {
     fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String> {
-        // `do script` sends the text to a new interactive Terminal window.
-        // `quoted form of` wraps the path in shell-safe single quotes so
-        // spaces and odd characters don't break the cd. After the agent
-        // exits, the shell remains open in the project directory.
+        // Two-step launch, replicating manual use:
         //
-        // Set the window/tab title via Terminal.app's native `custom title`
-        // property so the user can see which project a window belongs to.
-        // We capture the tab returned by `do script` and set its custom
-        // title explicitly — this is more robust than an OSC escape
-        // sequence (which the agent's TUI would immediately overwrite).
-        // `quoted form of` wraps the path in shell-safe single quotes.
+        // 1. Open a new tab, cd into the project, set an OSC title hint, and
+        //    let the shell render ONE prompt. Zsh themes like powerlevel10k
+        //    set the window title to the current directory in their precmd
+        //    hook — but that hook only fires when a prompt is drawn. If we
+        //    send "cd ... && agent" as one line, no prompt is drawn between
+        //    cd and the agent, so p10k never sets the directory title, and
+        //    Terminal.app falls back to its device name ("jiangfeng").
+        //
+        // 2. After a short delay (prompt rendered + p10k title applied),
+        //    send the agent command into the same tab.
+        //
+        // We also set the title via OSC in step 1 as a fallback for users
+        // without a title-setting prompt theme. `quoted form of` makes the
+        // path shell-safe. The literal "\033]0;...\007" is interpreted by
+        // printf as the OSC 0 title sequence; we avoid raw 0x1B bytes
+        // because the terminal consumes them before the shell parses.
+        let title_part = format!("\\\\033]0;{}\\\\007", escape_applescript(title));
         let script = format!(
-            "tell application \"Terminal\"\nactivate\nset newTab to do script (\"cd \" & quoted form of \"{}\" & \" && {}\")\nset custom title of newTab to \"{}\"\nend tell",
+            "tell application \"Terminal\"\nactivate\nset newTab to do script (\"printf '{}'; cd \" & quoted form of \"{}\")\ndelay 0.5\ndo script \"{}\" in newTab\nend tell",
+            title_part,
             escape_applescript(dir),
-            escape_applescript(command),
-            escape_applescript(title)
+            escape_applescript(command)
         );
         let output = Command::new("osascript")
             .arg("-e")
