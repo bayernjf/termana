@@ -868,3 +868,116 @@ input[type="checkbox"] {
   border-color: rgba(126, 231, 135, 0.45);
   background: rgba(126, 231, 135, 0.1);
 }
+
+/* ---- version badge + update button ---- */
+.version-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 1px 7px;
+  border-radius: 999px;
+  margin-left: 2px;
+}
+
+.update-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.update-btn:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+}
+
+.update-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ---- announcement banner ---- */
+.announcement-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.announcement-item {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+
+.announcement-item.warning {
+  border-left-color: #f0b429;
+}
+
+.announcement-item.danger {
+  border-left-color: var(--danger);
+}
+
+.announcement-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.announcement-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.announcement-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+}
+
+.announcement-close:hover {
+  color: var(--danger);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.announcement-content {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.announcement-content p {
+  margin: 4px 0;
+}
+
+.announcement-content a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.announcement-content a:hover {
+  text-decoration: underline;
+}
+
+.announcement-content code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+}

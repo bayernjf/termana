@@ -70,8 +70,20 @@ impl TerminalAdapter for WindowsPowerShell {
         // -NoExit: keep the window open after the agent exits.
         // Set the window title first so the user can identify the project;
         // escape single quotes in the title by doubling them.
+        //
+        // Refresh PATH from the registry (Machine + User) before running the
+        // agent command. When a GUI app is launched (e.g. via File Explorer
+        // or Tauri), it inherits a minimal PATH that may miss toolchains
+        // installed via fnm/volta/hermes. `$env:Path` is rebuilt from the
+        // registry so the spawned PowerShell window sees the same PATH the
+        // user gets in a normal terminal.
         let ps_command = format!(
-            "$Host.UI.RawUI.WindowTitle = '{}'; Set-Location '{}'; {}",
+            "$m = [Environment]::GetEnvironmentVariable('Path','Machine'); \
+             $u = [Environment]::GetEnvironmentVariable('Path','User'); \
+             $env:Path = \"$m;$u\"; \
+             $Host.UI.RawUI.WindowTitle = '{}'; \
+             Set-Location '{}'; \
+             {}",
             title.replace('\'', "''"),
             dir.replace('\'', "''"),
             command

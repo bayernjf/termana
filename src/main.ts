@@ -59,6 +59,22 @@ interface Group {
   projectIds: string[];
 }
 
+interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  downloadUrl: string;
+  releaseNotes: string;
+  releaseUrl: string;
+}
+
+interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  severity: string;
+}
+
 let projects: Project[] = [];
 let contextStatuses = new Map<string, ContextStatus>();
 let agents: AgentInfo[] = [];
@@ -484,6 +500,83 @@ window.addEventListener("DOMContentLoaded", async () => {
   await refreshAgents();
   await refreshProjects();
   await refreshGroups();
+
+  // ---- announcements ----
+  const dismissedAnnouncements = new Set(
+    JSON.parse(localStorage.getItem("termana.dismissedAnnouncements") ?? "[]") as string[]
+  );
+
+  async function loadAnnouncements() {
+    try {
+      const announcements = await invoke<Announcement[]>("fetch_announcements");
+      const visible = announcements.filter((a) => !dismissedAnnouncements.has(a.id));
+      const banner = document.getElementById("announcement-banner")!;
+      if (visible.length === 0) {
+        banner.classList.add("hidden");
+        return;
+      }
+      banner.classList.remove("hidden");
+      banner.innerHTML = visible
+        .map(
+          (a) => `
+        <div class="announcement-item ${escapeHtml(a.severity)}" data-id="${escapeHtml(a.id)}">
+          <div class="announcement-head">
+            <span class="announcement-title">${escapeHtml(a.title)}</span>
+            <button class="announcement-close" data-id="${escapeHtml(a.id)}" title="关闭">✕</button>
+          </div>
+          <div class="announcement-content">${marked.parse(a.content) as string}</div>
+        </div>`
+        )
+        .join("");
+    } catch {
+      // silently ignore announcement fetch errors
+    }
+  }
+
+  document.getElementById("announcement-banner")!.addEventListener("click", (e) => {
+    const closeBtn = (e.target as HTMLElement).closest(".announcement-close") as HTMLElement | null;
+    if (!closeBtn) return;
+    const id = closeBtn.dataset.id!;
+    dismissedAnnouncements.add(id);
+    localStorage.setItem(
+      "termana.dismissedAnnouncements",
+      JSON.stringify([...dismissedAnnouncements])
+    );
+    loadAnnouncements();
+  });
+
+  loadAnnouncements();
+
+  // ---- check for updates ----
+  const updateBtn = document.getElementById("check-update-btn")!;
+  updateBtn.addEventListener("click", async () => {
+    updateBtn.disabled = true;
+    updateBtn.textContent = "↻ 检查中...";
+    try {
+      const info = await invoke<UpdateInfo>("check_for_updates");
+      const badge = document.getElementById("version-badge")!;
+      badge.textContent = `v${info.currentVersion}`;
+      if (info.hasUpdate) {
+        const download = info.downloadUrl
+          ? `\n\n下载地址：${info.downloadUrl}`
+          : `\n\n发布页面：${info.releaseUrl}`;
+        await message(
+          `发现新版本！\n\n当前版本：v${info.currentVersion}\n最新版本：v${info.latestVersion}${download}`,
+          { title: "发现新版本", kind: "info" }
+        );
+      } else {
+        await message(
+          `当前已是最新版本。\n\n当前版本：v${info.currentVersion}`,
+          { title: "已是最新版本", kind: "info" }
+        );
+      }
+    } catch (err) {
+      await message(`检查更新失败：${err}`, { title: "错误", kind: "error" });
+    } finally {
+      updateBtn.disabled = false;
+      updateBtn.textContent = "↻ 检查更新";
+    }
+  });
 
   document.getElementById("toggle-add-project")!.addEventListener("click", () => {
     document.getElementById("add-form")!.classList.toggle("hidden");
