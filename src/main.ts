@@ -510,13 +510,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       const announcements = await invoke<Announcement[]>("fetch_announcements");
       const visible = announcements.filter((a) => !dismissedAnnouncements.has(a.id));
-      const banner = document.getElementById("announcement-banner")!;
+      const badge = document.getElementById("bell-badge")!;
+      const dropdown = document.getElementById("announcement-dropdown")!;
       if (visible.length === 0) {
-        banner.classList.add("hidden");
+        badge.classList.add("hidden");
+        dropdown.innerHTML = `<div class="announcement-empty">暂无公告</div>`;
         return;
       }
-      banner.classList.remove("hidden");
-      banner.innerHTML = visible
+      badge.textContent = String(visible.length);
+      badge.classList.remove("hidden");
+      dropdown.innerHTML = visible
         .map(
           (a) => `
         <div class="announcement-item ${escapeHtml(a.severity)}" data-id="${escapeHtml(a.id)}">
@@ -533,7 +536,25 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  document.getElementById("announcement-banner")!.addEventListener("click", (e) => {
+  const bellBtn = document.getElementById("bell-btn")!;
+  const bellDropdown = document.getElementById("announcement-dropdown")!;
+
+  bellBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    bellDropdown.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest("#announcement-trigger")) {
+      bellDropdown.classList.add("hidden");
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") bellDropdown.classList.add("hidden");
+  });
+
+  bellDropdown.addEventListener("click", (e) => {
     const closeBtn = (e.target as HTMLElement).closest(".announcement-close") as HTMLElement | null;
     if (!closeBtn) return;
     const id = closeBtn.dataset.id!;

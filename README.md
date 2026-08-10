@@ -16,6 +16,8 @@ In a multi-agent world, each CLI agent vendor only manages its own config. terma
 - **Configurable agent list** - add / edit / remove agents; the list is persisted and detected.
 - **Local-first** - no account, no cloud, no server. Config is a TOML file on disk.
 - **Context editor** - edit and preview each project's canonical `AGENTS.md`; termana creates a safe `CLAUDE.md` pointer and surfaces divergent files for review.
+- **Update check** - checks the latest GitHub release and notifies you when a newer version is available.
+- **Announcements** - fetches in-app announcements from the repository (with a bell icon and dropdown), supports dismissible Markdown content.
 
 ## Supported terminals
 
@@ -73,12 +75,14 @@ src-tauri/src/
 ├── lib.rs              app entry, registers commands
 ├── config.rs           Project/Agent/Config model + TOML persistence
 ├── commands.rs         projects + agents CRUD, launch
+├── update.rs           GitHub release check + announcement fetching
 └── adapters/
     ├── agent.rs        install detection (login shell / Get-Command)
     └── terminal.rs     TerminalAdapter: macOS + Windows
 src/
 ├── main.ts             panel UI
 └── styles.css          dark theme
+announcements.json      in-app announcements (fetched via raw GitHub URL)
 docs/
 ├── PRD.md
 └── technical-design.md
@@ -88,6 +92,7 @@ docs/
 
 - **v0** ✅ project registry, agent binding, one-click launch, install detection, configurable agent list
 - **v1** ✅ `AGENTS.md` editor, `CLAUDE.md` pointer, legacy-context migration, divergence detection and guarded reconciliation
+- **v1.1** ✅ update check, in-app announcements (bell icon + dropdown)
 - **v1 next** - deeper per-project config (model, permissions, MCP)
 - **v2** - cross-agent observability; agent handoff with shared context
 

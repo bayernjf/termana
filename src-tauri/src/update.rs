@@ -131,6 +131,25 @@ pub fn check_for_updates() -> Result<UpdateInfo, String> {
 
 #[tauri::command]
 pub fn fetch_announcements() -> Result<Vec<Announcement>, String> {
+    // In dev mode, try the local announcements.json first.
+    // CARGO_MANIFEST_DIR = src-tauri/, so project root is one level up.
+    #[cfg(debug_assertions)]
+    {
+        let local = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|p| p.join("announcements.json"));
+
+        if let Some(path) = local {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(announcements) = serde_json::from_str::<Vec<Announcement>>(&content) {
+                        return Ok(announcements);
+                    }
+                }
+            }
+        }
+    }
+
     let client = reqwest::blocking::Client::builder()
         .user_agent("termana-updater")
         .timeout(std::time::Duration::from_secs(10))
