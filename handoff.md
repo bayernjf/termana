@@ -1,6 +1,6 @@
 # termana - Handoff
 
-> Last updated: 2026-08-04 (v1 context editor implemented).
+> Last updated: 2026-08-11 (v1.1 announcement bell + update check implemented).
 
 ## Product
 
@@ -10,7 +10,8 @@ termana is a local-first Tauri desktop app for registering projects, binding a C
 
 - **v0 launcher:** implemented on macOS; Windows adapter exists but still needs real-machine verification.
 - **v1 context editor:** implemented. The old config-owned sync model and launch-time file overwrite have been removed.
-- **Working tree:** contains the v1 implementation described below; verify `git status` rather than relying on a recorded commit hash.
+- **v1.1 updates & announcements:** implemented. Update check fetches the latest GitHub release version. Announcements are fetched from the repo's `announcements.json` (with a local-dev fallback), displayed in a bell icon dropdown, and dismissible per-id via localStorage.
+- **Working tree:** contains the v1 + v1.1 implementation; verify `git status` rather than relying on a recorded commit hash.
 
 ## Context model
 
@@ -30,6 +31,7 @@ Backend commands registered in `src-tauri/src/lib.rs`:
 - Context: `read_context`, `save_context`, `context_status`
 - Agents: `list_agents`, `add_agent`, `update_agent`, `remove_agent`
 - Groups: `list_groups`, `add_group`, `update_group`, `remove_group`, `launch_group`
+- Updates & announcements: `check_for_updates`, `fetch_announcements`
 
 Removed context commands: `get_context`, `set_context`, `sync_context`. Launching no longer writes context files.
 
@@ -39,6 +41,7 @@ Removed context commands: `get_context`, `set_context`, `sync_context`. Launchin
 - The editor tracks dirty state and confirms before discarding changes.
 - Markdown preview escapes raw HTML and renders links/images as inert text.
 - Tauri CSP is enabled; global Tauri injection and the unused opener plugin/permission are disabled.
+- An announcement bell icon in the title bar shows an unread badge. Clicking opens a dropdown with dismissible Markdown announcements. Closed announcements are persisted in localStorage.
 
 ## Verification
 
