@@ -192,16 +192,19 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # Dev-snapshot only: tag the build with a unique per-day version so the
-      # artifact is recognisable as a snapshot. Files are NOT committed —
-      # `Restore version (dev snapshot)` reverts them after tauri-action runs.
+      # Dev-snapshot only: tag the build with a placeholder version that the
+      # Windows MSI bundler will accept (pure numeric, no semver prerelease).
+      # The release name "Dev Snapshot" + prerelease=true distinguishes it
+      # from main releases; the version is intentionally a low placeholder so
+      # the in-app updater never offers a snapshot over a real release.
+      # Files are NOT committed — `Restore version (dev snapshot)` reverts
+      # them after tauri-action runs.
       - name: Patch version for dev snapshot
         if: needs.resolve-version.outputs.is_dev == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          DATE=$(date -u +%Y%m%d)
-          DEV_VERSION="0.0.0-dev.${DATE}"
+          DEV_VERSION="0.0.0"
           npm version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null
           TMP=$(mktemp)
           jq --arg v "$DEV_VERSION" '.version = $v' src-tauri/tauri.conf.json > "$TMP"
