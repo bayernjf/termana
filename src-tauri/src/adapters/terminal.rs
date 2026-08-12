@@ -1,9 +1,10 @@
 use std::process::Command;
 
 /// A terminal knows how to open a new window, cd into a directory,
-/// and run a command in it.
+/// and run a command in it. `title` sets the window/tab title so the
+/// user can tell which project a window belongs to.
 pub trait TerminalAdapter {
-    fn launch(&self, dir: &str, command: &str) -> Result<(), String>;
+    fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String>;
 }
 
 #[cfg(target_os = "macos")]
@@ -19,13 +20,29 @@ fn escape_applescript(s: &str) -> String {
 
 #[cfg(target_os = "macos")]
 impl TerminalAdapter for MacTerminal {
-    fn launch(&self, dir: &str, command: &str) -> Result<(), String> {
-        // `do script` sends the text to a new interactive Terminal window.
-        // `quoted form of` wraps the path in shell-safe single quotes so
-        // spaces and odd characters don't break the cd. After the agent
-        // exits, the shell remains open in the project directory.
+    fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String> {
+        // Two-step launch, replicating manual use:
+        //
+        // 1. Open a new tab, cd into the project, set an OSC title hint, and
+        //    let the shell render ONE prompt. Zsh themes like powerlevel10k
+        //    set the window title to the current directory in their precmd
+        //    hook — but that hook only fires when a prompt is drawn. If we
+        //    send "cd ... && agent" as one line, no prompt is drawn between
+        //    cd and the agent, so p10k never sets the directory title, and
+        //    Terminal.app falls back to its device name ("jiangfeng").
+        //
+        // 2. After a short delay (prompt rendered + p10k title applied),
+        //    send the agent command into the same tab.
+        //
+        // We also set the title via OSC in step 1 as a fallback for users
+        // without a title-setting prompt theme. `quoted form of` makes the
+        // path shell-safe. The literal "\033]0;...\007" is interpreted by
+        // printf as the OSC 0 title sequence; we avoid raw 0x1B bytes
+        // because the terminal consumes them before the shell parses.
+        let title_part = format!("\\\\033]0;{}\\\\007", escape_applescript(title));
         let script = format!(
-            "tell application \"Terminal\"\nactivate\ndo script \"cd \" & quoted form of \"{}\" & \" && {}\"\nend tell",
+            "tell application \"Terminal\"\nactivate\nset newTab to do script (\"printf '{}'; cd \" & quoted form of \"{}\")\ndelay 0.5\ndo script \"{}\" in newTab\nend tell",
+            title_part,
             escape_applescript(dir),
             escape_applescript(command)
         );
@@ -43,7 +60,7 @@ impl TerminalAdapter for MacTerminal {
 
 #[cfg(target_os = "windows")]
 impl TerminalAdapter for WindowsPowerShell {
-    fn launch(&self, dir: &str, command: &str) -> Result<(), String> {
+    fn launch(&self, title: &str, dir: &str, command: &str) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         // CREATE_NEW_CONSOLE: give the process its own window (termana is a
         // GUI app with no console of its own).
@@ -51,8 +68,26 @@ impl TerminalAdapter for WindowsPowerShell {
         // No -NoProfile: let the PowerShell profile load so the environment
         // matches the user's normal terminal (fnm / volta PATH, etc.).
         // -NoExit: keep the window open after the agent exits.
-        // Single-quote the path; double any embedded single quote.
-        let ps_command = format!("Set-Location '{}'; {}", dir.replace('\'', "''"), command);
+        // Set the window title first so the user can identify the project;
+        // escape single quotes in the title by doubling them.
+        //
+        // Refresh PATH from the registry (Machine + User) before running the
+        // agent command. When a GUI app is launched (e.g. via File Explorer
+        // or Tauri), it inherits a minimal PATH that may miss toolchains
+        // installed via fnm/volta/hermes. `$env:Path` is rebuilt from the
+        // registry so the spawned PowerShell window sees the same PATH the
+        // user gets in a normal terminal.
+        let ps_command = format!(
+            "$m = [Environment]::GetEnvironmentVariable('Path','Machine'); \
+             $u = [Environment]::GetEnvironmentVariable('Path','User'); \
+             $env:Path = \"$m;$u\"; \
+             $Host.UI.RawUI.WindowTitle = '{}'; \
+             Set-Location '{}'; \
+             {}",
+            title.replace('\'', "''"),
+            dir.replace('\'', "''"),
+            command
+        );
         Command::new("powershell")
             .arg("-NoExit")
             .arg("-Command")

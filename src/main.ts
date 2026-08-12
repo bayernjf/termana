@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, confirm, message } from "@tauri-apps/plugin-dialog";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { marked } from "marked";
 
 interface Project {
@@ -57,6 +59,24 @@ interface Group {
   id: string;
   name: string;
   projectIds: string[];
+}
+
+interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  downloadUrl: string;
+  releaseNotes: string;
+  releaseUrl: string;
+}
+
+interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  severity: string;
+  publishedAt?: string;
+  expiresAt?: string;
 }
 
 let projects: Project[] = [];
@@ -374,14 +394,14 @@ async function refreshProjects() {
   }
 }
 
-function showContextMode(mode: "edit" | "preview") {
+async function showContextMode(mode: "edit" | "preview") {
   document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((tab) =>
     tab.classList.toggle("active", tab.dataset.mode === mode)
   );
   const text = document.getElementById("context-text") as HTMLTextAreaElement;
   const preview = document.getElementById("context-preview")!;
   if (mode === "preview") {
-    preview.innerHTML = marked.parse(text.value, { renderer: previewRenderer }) as string;
+    preview.innerHTML = await marked.parse(text.value, { renderer: previewRenderer });
     text.classList.add("hidden");
     preview.classList.remove("hidden");
   } else {
@@ -399,7 +419,7 @@ async function loadContextEditor(projectId: string) {
   (document.getElementById("context-text") as HTMLTextAreaElement).value = snapshot.content;
   document.getElementById("context-project-label")!.textContent =
     `${project?.name ?? "project"} · ${project?.agent ?? ""} -> ${CONTEXT_FILES}`;
-  showContextMode("edit");
+  await showContextMode("edit");
   const form = document.getElementById("context-form")!;
   form.classList.remove("hidden");
   const targetCard = [...document.querySelectorAll("#projects .card")].find(
@@ -484,6 +504,227 @@ window.addEventListener("DOMContentLoaded", async () => {
   await refreshAgents();
   await refreshProjects();
   await refreshGroups();
+
+  // ---- announcements ----
+  const dismissedAnnouncements = new Set(
+    JSON.parse(localStorage.getItem("termana.dismissedAnnouncements") ?? "[]") as string[]
+  );
+  let allAnnouncements: Announcement[] = [];
+  let announcementView: "active" | "history" = "active";
+  const ANNOUNCEMENT_REFRESH_MS = 10 * 60 * 1000; // 10 min
+
+  const parseTs = (s: string | undefined): number => {
+    if (!s) return 0;
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? 0 : t;
+  };
+
+  const isExpired = (a: Announcement): boolean => {
+    const exp = parseTs(a.expiresAt);
+    return exp > 0 && Date.now() > exp;
+  };
+
+  const sortByPublished = (list: Announcement[]): Announcement[] =>
+    [...list].sort((a, b) => {
+      const ta = parseTs(a.publishedAt) || parseTs(a.id);
+      const tb = parseTs(b.publishedAt) || parseTs(b.id);
+      return tb - ta;
+    });
+
+  async function renderAnnouncementDropdown() {
+    const badge = document.getElementById("bell-badge")!;
+    const dropdown = document.getElementById("announcement-dropdown")!;
+    const activeUnread = allAnnouncements.filter(
+      (a) => !isExpired(a) && !dismissedAnnouncements.has(a.id)
+    );
+    if (activeUnread.length > 0) {
+      badge.textContent = String(activeUnread.length);
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+    if (announcementView === "active") {
+      const items = activeUnread;
+      const listHtml =
+        items.length === 0
+          ? `<div class="announcement-empty">暂无公告</div>`
+          : (
+              await Promise.all(
+                items.map(async (a) => {
+                  const content = await marked.parse(a.content);
+                  return `
+        <div class="announcement-item ${escapeHtml(a.severity)}" data-id="${escapeHtml(a.id)}">
+          <div class="announcement-head">
+            <span class="announcement-title">${escapeHtml(a.title)}</span>
+            <button class="announcement-close" data-id="${escapeHtml(a.id)}" title="关闭">✕</button>
+          </div>
+          <div class="announcement-content">${content}</div>
+        </div>`;
+                })
+              )
+            ).join("");
+      dropdown.innerHTML = `
+        <div class="announcement-list">${listHtml}</div>
+        <div class="announcement-footer">
+          <button class="announcement-history-btn" id="announcement-history-btn">查看历史</button>
+        </div>`;
+      return;
+    }
+    // history view
+    const sorted = sortByPublished(allAnnouncements);
+    if (sorted.length === 0) {
+      dropdown.innerHTML = `
+        <div class="announcement-list"><div class="announcement-empty">暂无历史公告</div></div>
+        <div class="announcement-footer">
+          <button class="announcement-history-btn" id="announcement-back-btn">返回</button>
+        </div>`;
+      return;
+    }
+    const fmt = (a: Announcement) => {
+      const ts = parseTs(a.publishedAt) || parseTs(a.id);
+      return ts > 0 ? new Date(ts).toLocaleString() : "—";
+    };
+    const listHtml = (
+      await Promise.all(
+        sorted.map(async (a) => {
+          const expired = isExpired(a);
+          const dismissed = dismissedAnnouncements.has(a.id);
+          const tags: string[] = [];
+          if (expired) tags.push('<span class="announcement-tag expired">已过期</span>');
+          else if (dismissed) tags.push('<span class="announcement-tag dismissed">已关闭</span>');
+          else tags.push('<span class="announcement-tag active">进行中</span>');
+          const content = await marked.parse(a.content);
+          return `
+        <div class="announcement-item history ${escapeHtml(a.severity)} ${expired || dismissed ? "muted" : ""}" data-id="${escapeHtml(a.id)}">
+          <div class="announcement-head">
+            <span class="announcement-title">${escapeHtml(a.title)}</span>
+            <span class="announcement-tags">${tags.join("")}</span>
+          </div>
+          <div class="announcement-meta">${fmt(a)}</div>
+          <div class="announcement-content">${content}</div>
+        </div>`;
+        })
+      )
+    ).join("");
+    dropdown.innerHTML = `
+      <div class="announcement-list announcement-list-history">${listHtml}</div>
+      <div class="announcement-footer">
+        <button class="announcement-history-btn" id="announcement-back-btn">← 返回</button>
+      </div>`;
+  }
+
+  async function loadAnnouncements({ silent = false }: { silent?: boolean } = {}) {
+    try {
+      const fetched = await invoke<Announcement[]>("fetch_announcements");
+      allAnnouncements = fetched;
+    } catch {
+      if (!silent) {
+        // first-load failure: surface "暂无公告" rather than a stale state
+        allAnnouncements = [];
+      }
+    }
+    await renderAnnouncementDropdown();
+  }
+
+  const bellBtn = document.getElementById("bell-btn")!;
+  const bellDropdown = document.getElementById("announcement-dropdown")!;
+
+  bellBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    bellDropdown.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest("#announcement-trigger")) {
+      bellDropdown.classList.add("hidden");
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") bellDropdown.classList.add("hidden");
+  });
+
+  bellDropdown.addEventListener("click", async (e) => {
+    const target = e.target as HTMLElement;
+    const historyBtn = target.closest("#announcement-history-btn") as HTMLElement | null;
+    if (historyBtn) {
+      announcementView = "history";
+      await renderAnnouncementDropdown();
+      return;
+    }
+    const backBtn = target.closest("#announcement-back-btn") as HTMLElement | null;
+    if (backBtn) {
+      announcementView = "active";
+      await renderAnnouncementDropdown();
+      return;
+    }
+    const closeBtn = target.closest(".announcement-close") as HTMLElement | null;
+    if (!closeBtn) return;
+    const id = closeBtn.dataset.id!;
+    dismissedAnnouncements.add(id);
+    localStorage.setItem(
+      "termana.dismissedAnnouncements",
+      JSON.stringify([...dismissedAnnouncements])
+    );
+    await renderAnnouncementDropdown();
+  });
+
+  await loadAnnouncements();
+
+  // Re-fetch on focus and every 10 minutes so users see new announcements
+  // without restarting the app.
+  window.addEventListener("focus", () => {
+    loadAnnouncements({ silent: true });
+  });
+  setInterval(() => {
+    loadAnnouncements({ silent: true });
+  }, ANNOUNCEMENT_REFRESH_MS);
+
+  // ---- check for updates ----
+  const updateBtn = document.getElementById("check-update-btn") as HTMLButtonElement;
+  updateBtn.addEventListener("click", async () => {
+    updateBtn.disabled = true;
+    updateBtn.textContent = "↻ 检查中...";
+    try {
+      const info = await invoke<UpdateInfo>("check_for_updates");
+      const badge = document.getElementById("version-badge")!;
+      badge.textContent = `v${info.currentVersion}`;
+      if (!info.hasUpdate) {
+        await message(
+          `当前已是最新版本。\n\n当前版本：v${info.currentVersion}`,
+          { title: "已是最新版本", kind: "info" }
+        );
+        return;
+      }
+      const install = await confirm(
+        `发现新版本！\n\n当前版本：v${info.currentVersion}\n最新版本：v${info.latestVersion}\n\n是否立即下载并安装？`,
+        { title: "发现新版本", kind: "info" }
+      );
+      if (!install) return;
+      try {
+        const update = await check();
+        if (!update?.available) {
+          throw new Error("updater plugin reports no update available");
+        }
+        updateBtn.textContent = "↻ 下载中...";
+        await update.downloadAndInstall();
+        await relaunch();
+      } catch (updaterErr) {
+        const fallback = info.downloadUrl
+          ? info.downloadUrl
+          : info.releaseUrl;
+        await message(
+          `自动更新失败：${updaterErr}\n\n请手动下载：${fallback}`,
+          { title: "更新失败", kind: "error" }
+        );
+      }
+    } catch (err) {
+      await message(`检查更新失败：${err}`, { title: "错误", kind: "error" });
+    } finally {
+      updateBtn.disabled = false;
+      updateBtn.textContent = "↻ 检查更新";
+    }
+  });
 
   document.getElementById("toggle-add-project")!.addEventListener("click", () => {
     document.getElementById("add-form")!.classList.toggle("hidden");
@@ -849,8 +1090,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // context editor: edit / preview tabs
   document.querySelectorAll<HTMLButtonElement>("#context-form .tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      showContextMode(tab.dataset.mode === "preview" ? "preview" : "edit");
+    tab.addEventListener("click", async () => {
+      await showContextMode(tab.dataset.mode === "preview" ? "preview" : "edit");
     });
   });
 

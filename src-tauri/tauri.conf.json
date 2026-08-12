@@ -19,8 +19,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'",
-      "devCsp": "default-src 'self' http://localhost:1442; connect-src ipc: http://ipc.localhost ws://localhost:1443 http://localhost:1442; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://api.github.com https://raw.githubusercontent.com; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'",
+      "devCsp": "default-src 'self' http://localhost:1442; connect-src ipc: http://ipc.localhost ws://localhost:1443 http://localhost:1442 https://api.github.com https://raw.githubusercontent.com; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
@@ -33,5 +33,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://api.github.com/repos/bayernjf/termana/releases/latest"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBM0EyOTlEMzI4NUUxMTIKUldRUzRZVXluU2s2eWdOVTBWT2xMdGM0eXZnTTl2bVkwZHgyOXg0b21uZ1E3V1ZyNjZMbldwaUMK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

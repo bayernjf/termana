@@ -1,11 +1,13 @@
 mod adapters;
 mod commands;
 mod config;
+mod update;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::list_projects,
             commands::add_project,
@@ -25,6 +27,8 @@ pub fn run() {
             commands::update_group,
             commands::remove_group,
             commands::launch_group,
+            update::check_for_updates,
+            update::fetch_announcements,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
