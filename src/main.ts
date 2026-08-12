@@ -75,6 +75,8 @@ interface Announcement {
   title: string;
   content: string;
   severity: string;
+  publishedAt?: string;
+  expiresAt?: string;
 }
 
 let projects: Project[] = [];
@@ -507,23 +509,48 @@ window.addEventListener("DOMContentLoaded", async () => {
   const dismissedAnnouncements = new Set(
     JSON.parse(localStorage.getItem("termana.dismissedAnnouncements") ?? "[]") as string[]
   );
+  let allAnnouncements: Announcement[] = [];
+  let announcementView: "active" | "history" = "active";
+  const ANNOUNCEMENT_REFRESH_MS = 10 * 60 * 1000; // 10 min
 
-  async function loadAnnouncements() {
-    try {
-      const announcements = await invoke<Announcement[]>("fetch_announcements");
-      const visible = announcements.filter((a) => !dismissedAnnouncements.has(a.id));
-      const badge = document.getElementById("bell-badge")!;
-      const dropdown = document.getElementById("announcement-dropdown")!;
-      if (visible.length === 0) {
-        badge.classList.add("hidden");
-        dropdown.innerHTML = `<div class="announcement-empty">暂无公告</div>`;
-        return;
-      }
-      badge.textContent = String(visible.length);
+  const parseTs = (s: string | undefined): number => {
+    if (!s) return 0;
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? 0 : t;
+  };
+
+  const isExpired = (a: Announcement): boolean => {
+    const exp = parseTs(a.expiresAt);
+    return exp > 0 && Date.now() > exp;
+  };
+
+  const sortByPublished = (list: Announcement[]): Announcement[] =>
+    [...list].sort((a, b) => {
+      const ta = parseTs(a.publishedAt) || parseTs(a.id);
+      const tb = parseTs(b.publishedAt) || parseTs(b.id);
+      return tb - ta;
+    });
+
+  function renderAnnouncementDropdown() {
+    const badge = document.getElementById("bell-badge")!;
+    const dropdown = document.getElementById("announcement-dropdown")!;
+    const activeUnread = allAnnouncements.filter(
+      (a) => !isExpired(a) && !dismissedAnnouncements.has(a.id)
+    );
+    if (activeUnread.length > 0) {
+      badge.textContent = String(activeUnread.length);
       badge.classList.remove("hidden");
-      dropdown.innerHTML = visible
-        .map(
-          (a) => `
+    } else {
+      badge.classList.add("hidden");
+    }
+    if (announcementView === "active") {
+      const items = activeUnread;
+      const listHtml =
+        items.length === 0
+          ? `<div class="announcement-empty">暂无公告</div>`
+          : items
+              .map(
+                (a) => `
         <div class="announcement-item ${escapeHtml(a.severity)}" data-id="${escapeHtml(a.id)}">
           <div class="announcement-head">
             <span class="announcement-title">${escapeHtml(a.title)}</span>
@@ -531,11 +558,66 @@ window.addEventListener("DOMContentLoaded", async () => {
           </div>
           <div class="announcement-content">${marked.parse(a.content) as string}</div>
         </div>`
-        )
-        .join("");
-    } catch {
-      // silently ignore announcement fetch errors
+              )
+              .join("");
+      dropdown.innerHTML = `
+        <div class="announcement-list">${listHtml}</div>
+        <div class="announcement-footer">
+          <button class="announcement-history-btn" id="announcement-history-btn">查看历史</button>
+        </div>`;
+      return;
     }
+    // history view
+    const sorted = sortByPublished(allAnnouncements);
+    if (sorted.length === 0) {
+      dropdown.innerHTML = `
+        <div class="announcement-list"><div class="announcement-empty">暂无历史公告</div></div>
+        <div class="announcement-footer">
+          <button class="announcement-history-btn" id="announcement-back-btn">返回</button>
+        </div>`;
+      return;
+    }
+    const fmt = (a: Announcement) => {
+      const ts = parseTs(a.publishedAt) || parseTs(a.id);
+      return ts > 0 ? new Date(ts).toLocaleString() : "—";
+    };
+    const listHtml = sorted
+      .map((a) => {
+        const expired = isExpired(a);
+        const dismissed = dismissedAnnouncements.has(a.id);
+        const tags: string[] = [];
+        if (expired) tags.push('<span class="announcement-tag expired">已过期</span>');
+        else if (dismissed) tags.push('<span class="announcement-tag dismissed">已关闭</span>');
+        else tags.push('<span class="announcement-tag active">进行中</span>');
+        return `
+        <div class="announcement-item history ${escapeHtml(a.severity)} ${expired || dismissed ? "muted" : ""}" data-id="${escapeHtml(a.id)}">
+          <div class="announcement-head">
+            <span class="announcement-title">${escapeHtml(a.title)}</span>
+            <span class="announcement-tags">${tags.join("")}</span>
+          </div>
+          <div class="announcement-meta">${fmt(a)}</div>
+          <div class="announcement-content">${marked.parse(a.content) as string}</div>
+        </div>`;
+      })
+      .join("");
+    dropdown.innerHTML = `
+      <div class="announcement-list announcement-list-history">${listHtml}</div>
+      <div class="announcement-footer">
+        <button class="announcement-history-btn" id="announcement-back-btn">← 返回</button>
+      </div>`;
+  }
+
+  async function loadAnnouncements({ silent = false }: { silent?: boolean } = {}) {
+    try {
+      const fetched = await invoke<Announcement[]>("fetch_announcements");
+      allAnnouncements = fetched;
+    } catch {
+      if (!silent) {
+        // first-load failure: surface "暂无公告" rather than a stale state
+        allAnnouncements = [];
+      }
+    }
+    renderAnnouncementDropdown();
   }
 
   const bellBtn = document.getElementById("bell-btn")!;
@@ -557,7 +639,20 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   bellDropdown.addEventListener("click", (e) => {
-    const closeBtn = (e.target as HTMLElement).closest(".announcement-close") as HTMLElement | null;
+    const target = e.target as HTMLElement;
+    const historyBtn = target.closest("#announcement-history-btn") as HTMLElement | null;
+    if (historyBtn) {
+      announcementView = "history";
+      renderAnnouncementDropdown();
+      return;
+    }
+    const backBtn = target.closest("#announcement-back-btn") as HTMLElement | null;
+    if (backBtn) {
+      announcementView = "active";
+      renderAnnouncementDropdown();
+      return;
+    }
+    const closeBtn = target.closest(".announcement-close") as HTMLElement | null;
     if (!closeBtn) return;
     const id = closeBtn.dataset.id!;
     dismissedAnnouncements.add(id);
@@ -565,10 +660,19 @@ window.addEventListener("DOMContentLoaded", async () => {
       "termana.dismissedAnnouncements",
       JSON.stringify([...dismissedAnnouncements])
     );
-    loadAnnouncements();
+    renderAnnouncementDropdown();
   });
 
   loadAnnouncements();
+
+  // Re-fetch on focus and every 10 minutes so users see new announcements
+  // without restarting the app.
+  window.addEventListener("focus", () => {
+    loadAnnouncements({ silent: true });
+  });
+  setInterval(() => {
+    loadAnnouncements({ silent: true });
+  }, ANNOUNCEMENT_REFRESH_MS);
 
   // ---- check for updates ----
   const updateBtn = document.getElementById("check-update-btn") as HTMLButtonElement;
