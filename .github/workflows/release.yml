@@ -31,16 +31,11 @@ on:
     branches:
       - main
       - dev
-    paths:
-      - "package.json"
-      - "package-lock.json"
-      - "src/**"
-      - "src-tauri/**"
-      - "index.html"
-      - "vite.config.ts"
-      - "tsconfig*.json"
-      - "announcements.json"
-      - ".github/workflows/release.yml"
+  # NOTE: paths filter intentionally omitted. The push evaluation against a
+  # default branch that has no .github/workflows directory produced zero
+  # workflow runs even when the diff included matching files. Run on every
+  # push to the listed branches and add workflow_dispatch for manual kicks.
+  workflow_dispatch:
 
 permissions:
   contents: write
