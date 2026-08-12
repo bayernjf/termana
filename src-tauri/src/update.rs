@@ -36,6 +36,10 @@ pub struct Announcement {
     pub title: String,
     pub content: String,
     pub severity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 fn current_version() -> String {

@@ -3,6 +3,8 @@
     "id": "2026-08-10-welcome",
     "title": "欢迎使用 termana",
     "content": "termana 是一个终端项目管理工具，支持一键启动 AI Agent。\n\n- 支持多种 Agent（Claude、Codex、Gemini 等）\n- 项目分组批量启动\n- AGENTS.md 上下文管理\n- 更新检查与公告系统",
-    "severity": "info"
+    "severity": "info",
+    "publishedAt": "2026-08-10T00:00:00Z",
+    "expiresAt": "2027-08-10T00:00:00Z"
   }
 ]
