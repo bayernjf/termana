@@ -1,8 +1,21 @@
 name: Release
 
-# Tag-driven release: push a `vX.Y.Z` tag and this workflow builds macOS + Windows
-# bundles, signs updater artifacts with the termana ed25519 key, generates
-# `latest.json`, and uploads everything to a draft GitHub Release.
+# Three-stage release pipeline (Tauri-adapted).
+#
+#   1. push `v*` tag   → official release (uses the tag as version, prerelease=false)
+#   2. push `main`     → auto-bump patch, write back package.json + tauri.conf.json,
+#                        commit [skip ci], tag the new commit, then release
+#   3. push `dev`      → Dev Snapshot (fixed tag `dev-snapshot`, prerelease=true,
+#                        overwritten on every push; per-build version `0.0.0-dev.YYYYMMDD`
+#                        is patched at build time, then restored so the branch stays clean)
+#
+# Why not split `build` and `publish` jobs like soft-desk:
+#   Tauri-action is a single black-box step that does build + sign + draft release
+#   + latest.json together. Splitting would force us to sign outside the action
+#   and reassemble latest.json manually, which is overkill for this project size.
+#   Instead we run tauri-action per platform in the matrix and rely on GitHub
+#   Release API idempotent uploads to merge assets and per-platform latest.json
+#   fields into the same draft release.
 #
 # Required GitHub Secrets:
 #   TAURI_SIGNING_PRIVATE_KEY          — PEM from `tauri signer generate`
@@ -15,18 +28,124 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
+      - dev
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src/**"
+      - "src-tauri/**"
+      - "index.html"
+      - "vite.config.ts"
+      - "tsconfig*.json"
+      - "announcements.json"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: write
 
 concurrency:
+  # Same ref's previous in-flight run is allowed to finish — never cancel a release
+  # mid-flight (would leave a half-uploaded draft).
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: release (${{ matrix.platform }})
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      release_name: ${{ steps.resolve.outputs.release_name }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
+      is_dev: ${{ steps.resolve.outputs.is_dev }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Resolve release tag and mode
+        id: resolve
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          IS_DEV=false
+          TAG_NAME=""
+          RELEASE_NAME=""
+          IS_PRERELEASE=true
+          COMMIT_SHA="$SHA"
+
+          if [[ "$REF" == refs/tags/v* ]]; then
+            TAG_NAME="$REF_NAME"
+            RELEASE_NAME="termana $REF_NAME"
+            IS_PRERELEASE=false
+          elif [[ "$REF" == refs/heads/main ]]; then
+            LATEST_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n 1 || true)
+            if [[ -z "$LATEST_TAG" ]]; then LATEST_TAG="v0.0.0"; fi
+            VERSION=${LATEST_TAG#v}
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            TAG_NAME="v${NEW_VERSION}"
+            RELEASE_NAME="termana ${TAG_NAME}"
+            IS_PRERELEASE=false
+
+            # Write the new version back to package.json (and its lockfile) and
+            # src-tauri/tauri.conf.json so tauri-action picks it up.
+            npm version "$NEW_VERSION" --no-git-tag-version >/dev/null
+            TMP=$(mktemp)
+            jq --arg v "$NEW_VERSION" '.version = $v' src-tauri/tauri.conf.json > "$TMP"
+            mv "$TMP" src-tauri/tauri.conf.json
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package.json package-lock.json src-tauri/tauri.conf.json
+            git commit -m "chore(release): bump version to ${NEW_VERSION} [skip ci]"
+            git push origin HEAD:main
+            COMMIT_SHA=$(git rev-parse HEAD)
+          elif [[ "$REF" == refs/heads/dev ]]; then
+            IS_DEV=true
+            TAG_NAME="dev-snapshot"
+            RELEASE_NAME="Dev Snapshot"
+            IS_PRERELEASE=true
+          else
+            echo "Unsupported ref: $REF" >&2
+            exit 1
+          fi
+
+          {
+            echo "tag_name=$TAG_NAME"
+            echo "release_name=$RELEASE_NAME"
+            echo "is_prerelease=$IS_PRERELEASE"
+            echo "commit_sha=$COMMIT_SHA"
+            echo "is_dev=$IS_DEV"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: resolve-version
     strategy:
+      # All three platforms must attempt even if one fails, so we can decide
+      # whether to publish or surface a clear failure.
       fail-fast: false
       matrix:
         include:
@@ -45,6 +164,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-version.outputs.commit_sha }}
+
+      - name: Set timezone to Beijing (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          sudo systemsetup -settimezone "Asia/Shanghai" || true
+          date
+
+      - name: Set timezone to Beijing (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: tzutil /s "China Standard Time"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -65,7 +197,23 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Type-check
+      # Dev-snapshot only: tag the build with a unique per-day version so the
+      # artifact is recognisable as a snapshot. Files are NOT committed —
+      # `Restore version (dev snapshot)` reverts them after tauri-action runs.
+      - name: Patch version for dev snapshot
+        if: needs.resolve-version.outputs.is_dev == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y%m%d)
+          DEV_VERSION="0.0.0-dev.${DATE}"
+          npm version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null
+          TMP=$(mktemp)
+          jq --arg v "$DEV_VERSION" '.version = $v' src-tauri/tauri.conf.json > "$TMP"
+          mv "$TMP" src-tauri/tauri.conf.json
+          echo "dev snapshot version set to $DEV_VERSION"
+
+      - name: Type check
         run: npm run check
 
       - name: Build & sign + draft release
@@ -75,9 +223,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "termana ${{ github.ref_name }}"
+          tagName: ${{ needs.resolve-version.outputs.tag_name }}
+          releaseName: ${{ needs.resolve-version.outputs.release_name }}
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ needs.resolve-version.outputs.is_prerelease }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+      # Always runs (even if build fails) so the dev branch working tree is
+      # left clean for the next push.
+      - name: Restore version (dev snapshot)
+        if: needs.resolve-version.outputs.is_dev == 'true'
+        shell: bash
+        run: |
+          git checkout -- package.json package-lock.json src-tauri/tauri.conf.json || true
