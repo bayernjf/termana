@@ -40,7 +40,7 @@
       "endpoints": [
         "https://api.github.com/repos/bayernjf/termana/releases/latest"
       ],
-      "pubkey": "REPLACE_ME_WITH_TAURI_SIGNER_GENERATE_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBM0EyOTlEMzI4NUUxMTIKUldRUzRZVXluU2s2eWdOVTBWT2xMdGM0eXZnTTl2bVkwZHgyOXg0b21uZ1E3V1ZyNjZMbldwaUMK",
       "windows": {
         "installMode": "passive"
       }
