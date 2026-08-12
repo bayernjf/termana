@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, confirm, message } from "@tauri-apps/plugin-dialog";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { marked } from "marked";
 
 interface Project {
@@ -569,7 +571,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   loadAnnouncements();
 
   // ---- check for updates ----
-  const updateBtn = document.getElementById("check-update-btn")!;
+  const updateBtn = document.getElementById("check-update-btn") as HTMLButtonElement;
   updateBtn.addEventListener("click", async () => {
     updateBtn.disabled = true;
     updateBtn.textContent = "↻ 检查中...";
@@ -577,18 +579,33 @@ window.addEventListener("DOMContentLoaded", async () => {
       const info = await invoke<UpdateInfo>("check_for_updates");
       const badge = document.getElementById("version-badge")!;
       badge.textContent = `v${info.currentVersion}`;
-      if (info.hasUpdate) {
-        const download = info.downloadUrl
-          ? `\n\n下载地址：${info.downloadUrl}`
-          : `\n\n发布页面：${info.releaseUrl}`;
-        await message(
-          `发现新版本！\n\n当前版本：v${info.currentVersion}\n最新版本：v${info.latestVersion}${download}`,
-          { title: "发现新版本", kind: "info" }
-        );
-      } else {
+      if (!info.hasUpdate) {
         await message(
           `当前已是最新版本。\n\n当前版本：v${info.currentVersion}`,
           { title: "已是最新版本", kind: "info" }
+        );
+        return;
+      }
+      const install = await confirm(
+        `发现新版本！\n\n当前版本：v${info.currentVersion}\n最新版本：v${info.latestVersion}\n\n是否立即下载并安装？`,
+        { title: "发现新版本", kind: "info" }
+      );
+      if (!install) return;
+      try {
+        const update = await check();
+        if (!update?.available) {
+          throw new Error("updater plugin reports no update available");
+        }
+        updateBtn.textContent = "↻ 下载中...";
+        await update.downloadAndInstall();
+        await relaunch();
+      } catch (updaterErr) {
+        const fallback = info.downloadUrl
+          ? info.downloadUrl
+          : info.releaseUrl;
+        await message(
+          `自动更新失败：${updaterErr}\n\n请手动下载：${fallback}`,
+          { title: "更新失败", kind: "error" }
         );
       }
     } catch (err) {
