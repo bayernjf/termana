@@ -394,14 +394,14 @@ async function refreshProjects() {
   }
 }
 
-function showContextMode(mode: "edit" | "preview") {
+async function showContextMode(mode: "edit" | "preview") {
   document.querySelectorAll<HTMLElement>("#context-form .tab").forEach((tab) =>
     tab.classList.toggle("active", tab.dataset.mode === mode)
   );
   const text = document.getElementById("context-text") as HTMLTextAreaElement;
   const preview = document.getElementById("context-preview")!;
   if (mode === "preview") {
-    preview.innerHTML = marked.parse(text.value, { renderer: previewRenderer }) as string;
+    preview.innerHTML = await marked.parse(text.value, { renderer: previewRenderer });
     text.classList.add("hidden");
     preview.classList.remove("hidden");
   } else {
@@ -419,7 +419,7 @@ async function loadContextEditor(projectId: string) {
   (document.getElementById("context-text") as HTMLTextAreaElement).value = snapshot.content;
   document.getElementById("context-project-label")!.textContent =
     `${project?.name ?? "project"} · ${project?.agent ?? ""} -> ${CONTEXT_FILES}`;
-  showContextMode("edit");
+  await showContextMode("edit");
   const form = document.getElementById("context-form")!;
   form.classList.remove("hidden");
   const targetCard = [...document.querySelectorAll("#projects .card")].find(
@@ -531,7 +531,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       return tb - ta;
     });
 
-  function renderAnnouncementDropdown() {
+  async function renderAnnouncementDropdown() {
     const badge = document.getElementById("bell-badge")!;
     const dropdown = document.getElementById("announcement-dropdown")!;
     const activeUnread = allAnnouncements.filter(
@@ -548,18 +548,21 @@ window.addEventListener("DOMContentLoaded", async () => {
       const listHtml =
         items.length === 0
           ? `<div class="announcement-empty">暂无公告</div>`
-          : items
-              .map(
-                (a) => `
+          : (
+              await Promise.all(
+                items.map(async (a) => {
+                  const content = await marked.parse(a.content);
+                  return `
         <div class="announcement-item ${escapeHtml(a.severity)}" data-id="${escapeHtml(a.id)}">
           <div class="announcement-head">
             <span class="announcement-title">${escapeHtml(a.title)}</span>
             <button class="announcement-close" data-id="${escapeHtml(a.id)}" title="关闭">✕</button>
           </div>
-          <div class="announcement-content">${marked.parse(a.content) as string}</div>
-        </div>`
+          <div class="announcement-content">${content}</div>
+        </div>`;
+                })
               )
-              .join("");
+            ).join("");
       dropdown.innerHTML = `
         <div class="announcement-list">${listHtml}</div>
         <div class="announcement-footer">
@@ -581,25 +584,28 @@ window.addEventListener("DOMContentLoaded", async () => {
       const ts = parseTs(a.publishedAt) || parseTs(a.id);
       return ts > 0 ? new Date(ts).toLocaleString() : "—";
     };
-    const listHtml = sorted
-      .map((a) => {
-        const expired = isExpired(a);
-        const dismissed = dismissedAnnouncements.has(a.id);
-        const tags: string[] = [];
-        if (expired) tags.push('<span class="announcement-tag expired">已过期</span>');
-        else if (dismissed) tags.push('<span class="announcement-tag dismissed">已关闭</span>');
-        else tags.push('<span class="announcement-tag active">进行中</span>');
-        return `
+    const listHtml = (
+      await Promise.all(
+        sorted.map(async (a) => {
+          const expired = isExpired(a);
+          const dismissed = dismissedAnnouncements.has(a.id);
+          const tags: string[] = [];
+          if (expired) tags.push('<span class="announcement-tag expired">已过期</span>');
+          else if (dismissed) tags.push('<span class="announcement-tag dismissed">已关闭</span>');
+          else tags.push('<span class="announcement-tag active">进行中</span>');
+          const content = await marked.parse(a.content);
+          return `
         <div class="announcement-item history ${escapeHtml(a.severity)} ${expired || dismissed ? "muted" : ""}" data-id="${escapeHtml(a.id)}">
           <div class="announcement-head">
             <span class="announcement-title">${escapeHtml(a.title)}</span>
             <span class="announcement-tags">${tags.join("")}</span>
           </div>
           <div class="announcement-meta">${fmt(a)}</div>
-          <div class="announcement-content">${marked.parse(a.content) as string}</div>
+          <div class="announcement-content">${content}</div>
         </div>`;
-      })
-      .join("");
+        })
+      )
+    ).join("");
     dropdown.innerHTML = `
       <div class="announcement-list announcement-list-history">${listHtml}</div>
       <div class="announcement-footer">
@@ -617,7 +623,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         allAnnouncements = [];
       }
     }
-    renderAnnouncementDropdown();
+    await renderAnnouncementDropdown();
   }
 
   const bellBtn = document.getElementById("bell-btn")!;
@@ -638,18 +644,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (e.key === "Escape") bellDropdown.classList.add("hidden");
   });
 
-  bellDropdown.addEventListener("click", (e) => {
+  bellDropdown.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
     const historyBtn = target.closest("#announcement-history-btn") as HTMLElement | null;
     if (historyBtn) {
       announcementView = "history";
-      renderAnnouncementDropdown();
+      await renderAnnouncementDropdown();
       return;
     }
     const backBtn = target.closest("#announcement-back-btn") as HTMLElement | null;
     if (backBtn) {
       announcementView = "active";
-      renderAnnouncementDropdown();
+      await renderAnnouncementDropdown();
       return;
     }
     const closeBtn = target.closest(".announcement-close") as HTMLElement | null;
@@ -660,10 +666,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       "termana.dismissedAnnouncements",
       JSON.stringify([...dismissedAnnouncements])
     );
-    renderAnnouncementDropdown();
+    await renderAnnouncementDropdown();
   });
 
-  loadAnnouncements();
+  await loadAnnouncements();
 
   // Re-fetch on focus and every 10 minutes so users see new announcements
   // without restarting the app.
@@ -1084,8 +1090,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // context editor: edit / preview tabs
   document.querySelectorAll<HTMLButtonElement>("#context-form .tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      showContextMode(tab.dataset.mode === "preview" ? "preview" : "edit");
+    tab.addEventListener("click", async () => {
+      await showContextMode(tab.dataset.mode === "preview" ? "preview" : "edit");
     });
   });
 

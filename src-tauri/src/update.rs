@@ -70,34 +70,54 @@ fn is_newer(latest: &str, current: &str) -> bool {
 }
 
 /// Pick the best-matching download asset for the current platform.
+/// Release assets are named like `termana_{version}_{arch}.dmg` (macOS) or
+/// `termana_{version}_{arch}-setup.exe` / `_{arch}_en-US.msi` (Windows).
+/// The updater bundles (`termana_{arch}.app.tar.gz`) are the last resort
+/// because they are not standalone installers.
 fn pick_asset_url(assets: &[GitHubAsset]) -> String {
-    let platform_asset = if cfg!(target_os = "macos") {
-        "darwin"
-    } else if cfg!(target_os = "windows") {
-        "windows"
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
     } else {
-        "linux"
+        "x64" // covers x86_64
     };
 
-    // Prefer a platform-specific .zip/.dmg/.msi/.exe, else fall back to the release page.
+    let is_installer = |name: &str| -> bool {
+        if cfg!(target_os = "macos") {
+            name.ends_with(".dmg")
+        } else if cfg!(target_os = "windows") {
+            name.ends_with(".exe") || name.ends_with(".msi")
+        } else {
+            false
+        }
+    };
+
+    // 1) Prefer an installer matching the current architecture.
+    if let Some(asset) = assets.iter().find(|a| {
+        let name = a.name.to_lowercase();
+        name.contains(arch) && is_installer(&name)
+    }) {
+        return asset.browser_download_url.clone();
+    }
+
+    // 2) Any installer for the current OS (different arch).
+    if let Some(asset) = assets.iter().find(|a| is_installer(&a.name.to_lowercase())) {
+        return asset.browser_download_url.clone();
+    }
+
+    // 3) Fall back to the updater bundle for this arch.
+    if let Some(asset) = assets.iter().find(|a| {
+        let name = a.name.to_lowercase();
+        name.contains(arch) && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
+    }) {
+        return asset.browser_download_url.clone();
+    }
+
+    // 4) Any updater bundle.
     assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
-            name.contains(platform_asset)
-                && (name.ends_with(".zip")
-                    || name.ends_with(".dmg")
-                    || name.ends_with(".msi")
-                    || name.ends_with(".exe")
-                    || name.ends_with(".app.tar.gz"))
-        })
-        .or_else(|| {
-            assets
-                .iter()
-                .find(|a| {
-                    let name = a.name.to_lowercase();
-                    name.ends_with(".zip") || name.ends_with(".tar.gz")
-                })
+            name.ends_with(".zip") || name.ends_with(".tar.gz")
         })
         .map(|a| a.browser_download_url.clone())
         .unwrap_or_default()
