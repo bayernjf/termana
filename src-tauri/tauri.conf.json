@@ -33,5 +33,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://api.github.com/repos/bayernjf/termana/releases/latest"
+      ],
+      "pubkey": "REPLACE_ME_WITH_TAURI_SIGNER_GENERATE_PUBLIC_KEY",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
