@@ -71,9 +71,6 @@ jobs:
           node-version: "24"
           cache: "npm"
 
-      - name: Install jq
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
-
       - name: Resolve release tag and mode
         id: resolve
         env:
@@ -106,10 +103,11 @@ jobs:
 
             # Write the new version back to package.json (and its lockfile) and
             # src-tauri/tauri.conf.json so tauri-action picks it up.
+            # Node.js is already on the runner, so no extra apt dependency
+            # (apt-get on ubuntu-latest is flaky and was the cause of
+            # intermittent release failures).
             npm version "$NEW_VERSION" --no-git-tag-version >/dev/null
-            TMP=$(mktemp)
-            jq --arg v "$NEW_VERSION" '.version = $v' src-tauri/tauri.conf.json > "$TMP"
-            mv "$TMP" src-tauri/tauri.conf.json
+            TAURI_VERSION="$NEW_VERSION" node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version=process.env.TAURI_VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
 
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -206,9 +204,7 @@ jobs:
           set -euo pipefail
           DEV_VERSION="0.0.0"
           npm version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null
-          TMP=$(mktemp)
-          jq --arg v "$DEV_VERSION" '.version = $v' src-tauri/tauri.conf.json > "$TMP"
-          mv "$TMP" src-tauri/tauri.conf.json
+          TAURI_VERSION="$DEV_VERSION" node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version=process.env.TAURI_VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
           echo "dev snapshot version set to $DEV_VERSION"
 
       - name: Type check
