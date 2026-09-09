@@ -195,3 +195,98 @@ pub fn fetch_announcements() -> Result<Vec<Announcement>, String> {
 
     Ok(announcements)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mirrors the `cfg!` choices inside `pick_asset_url` so the fixtures below
+    /// are named the way real release assets are on whatever host runs the test.
+    const ARCH: &str = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x64"
+    };
+    const INSTALLER_EXT: &str = if cfg!(target_os = "macos") { "dmg" } else { "msi" };
+    const OTHER_ARCH: &str = if cfg!(target_arch = "aarch64") {
+        "x64"
+    } else {
+        "aarch64"
+    };
+
+    fn asset(name: &str) -> GitHubAsset {
+        GitHubAsset {
+            browser_download_url: format!("https://example.com/{name}"),
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn compares_version_components_numerically() {
+        assert!(is_newer("0.2.0", "0.1.0"));
+        assert!(is_newer("0.1.10", "0.1.9"));
+        assert!(!is_newer("0.1.0", "0.2.0"));
+        assert!(!is_newer("0.1.0", "0.1.0"));
+    }
+
+    #[test]
+    fn tolerates_v_prefix_and_missing_components() {
+        assert!(is_newer("v0.2.0", "0.1.0"));
+        assert!(is_newer("0.2", "0.1.9"));
+        // Absent components count as zero, so these are equal, not newer.
+        assert!(!is_newer("0.1", "0.1.0"));
+    }
+
+    #[test]
+    fn drops_non_numeric_version_components() {
+        // Documents a trap: "0-dev" fails to parse and is silently skipped, so
+        // a dev snapshot's leading zeros shift left and it never looks newer
+        // than a real release.
+        assert!(!is_newer("0.0.0-dev.20260812", "0.1.0"));
+        // Same reason: the suffix vanishes instead of ranking below the release.
+        assert!(!is_newer("0.1.0-rc1", "0.1.0"));
+    }
+
+    #[test]
+    fn prefers_installer_matching_the_current_arch() {
+        let assets = vec![
+            asset(&format!("termana_0.1.0_{OTHER_ARCH}.{INSTALLER_EXT}")),
+            asset(&format!("termana_0.1.0_{ARCH}.{INSTALLER_EXT}")),
+            asset(&format!("termana_{ARCH}.app.tar.gz")),
+        ];
+        assert_eq!(
+            pick_asset_url(&assets),
+            format!("https://example.com/termana_0.1.0_{ARCH}.{INSTALLER_EXT}")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_an_installer_for_another_arch() {
+        let assets = vec![
+            asset(&format!("termana_{ARCH}.app.tar.gz")),
+            asset(&format!("termana_0.1.0_{OTHER_ARCH}.{INSTALLER_EXT}")),
+        ];
+        assert_eq!(
+            pick_asset_url(&assets),
+            format!("https://example.com/termana_0.1.0_{OTHER_ARCH}.{INSTALLER_EXT}")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_updater_bundle_only_when_no_installer_exists() {
+        let assets = vec![
+            asset(&format!("termana_{OTHER_ARCH}.app.tar.gz")),
+            asset(&format!("termana_{ARCH}.app.tar.gz")),
+        ];
+        assert_eq!(
+            pick_asset_url(&assets),
+            format!("https://example.com/termana_{ARCH}.app.tar.gz")
+        );
+    }
+
+    #[test]
+    fn returns_empty_when_nothing_is_downloadable() {
+        assert_eq!(pick_asset_url(&[]), "");
+        assert_eq!(pick_asset_url(&[asset("latest.json")]), "");
+    }
+}
