@@ -124,3 +124,98 @@ pub fn save(cfg: &Config) -> Result<(), String> {
     temp.persist(&path).map_err(|e| e.error.to_string())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PRE_V1: &str = r#"
+        [[projects]]
+        id = "app"
+        name = "App"
+        path = "/tmp/app"
+        agent = "claude-code"
+    "#;
+
+    #[test]
+    fn parses_pre_v1_config_with_defaults() {
+        let cfg: Config = toml::from_str(PRE_V1).unwrap();
+        let project = &cfg.projects[0];
+
+        assert_eq!(project.id, "app");
+        assert_eq!(project.agent, "claude-code");
+        // Fields added after v0 must default rather than fail the whole parse.
+        assert_eq!(project.created_at, 0);
+        assert_eq!(project.last_launched, None);
+        assert_eq!(project.launch_count, 0);
+        assert_eq!(project.legacy_context, None);
+        assert!(cfg.agents.is_empty());
+        assert!(cfg.groups.is_empty());
+    }
+
+    #[test]
+    fn maps_legacy_context_field() {
+        let raw = format!("{PRE_V1}\n        context = \"Legacy notes\"\n");
+        let cfg: Config = toml::from_str(&raw).unwrap();
+
+        // The TOML key stays `context`; the field is renamed to mark it read-only.
+        assert_eq!(
+            cfg.projects[0].legacy_context.as_deref(),
+            Some("Legacy notes")
+        );
+
+        // Once migrated the key must disappear, not persist as an empty string.
+        let mut migrated = cfg.clone();
+        migrated.projects[0].legacy_context = None;
+        let out = toml::to_string(&migrated).unwrap();
+        assert!(!out.contains("context"), "legacy key survived: {out}");
+    }
+
+    #[test]
+    fn ignores_unknown_keys() {
+        // Forward compatibility: a config written by a newer termana must still load.
+        let cfg: Config =
+            toml::from_str("unknown_top_level = 1\n[[projects]]\nid = \"a\"\nname = \"A\"\npath = \"/tmp\"\nagent = \"codex\"\nfuture_field = true\n").unwrap();
+        assert_eq!(cfg.projects.len(), 1);
+    }
+
+    #[test]
+    fn malformed_toml_is_rejected_so_load_falls_back_to_default() {
+        // load() turns a parse error into Config::default(); this covers the parse half,
+        // since load() itself reads the real user-global config path.
+        assert!(toml::from_str::<Config>("[[projects]]\nid = ").is_err());
+        assert!(Config::default().projects.is_empty());
+    }
+
+    #[test]
+    fn builtin_agents_are_parsed_and_sorted() {
+        let agents = builtin_agents();
+
+        let claude = agents
+            .iter()
+            .find(|a| a.name == "Claude Code")
+            .expect("Claude Code preset missing");
+        assert_eq!(claude.id, "claude-code");
+        assert_eq!(claude.command, "claude");
+
+        // HashMap iteration is random, so builtin_agents() must impose an order.
+        let names: Vec<String> = agents.iter().map(|a| a.name.to_lowercase()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+
+        assert!(is_builtin_id("claude-code"));
+        assert!(!is_builtin_id("my-custom-agent"));
+    }
+
+    #[test]
+    fn slugify_lowercases_and_replaces_non_alphanumeric() {
+        assert_eq!(slugify("Claude Code"), "claude-code");
+        assert_eq!(slugify("OpenCode"), "opencode");
+        // Runs of separators are NOT collapsed — one dash per non-alphanumeric char.
+        assert_eq!(slugify("C++ Bot"), "c---bot");
+        // Leading/trailing separators are trimmed, and an id is never empty.
+        assert_eq!(slugify("  "), "item");
+        assert_eq!(slugify(""), "item");
+    }
+}

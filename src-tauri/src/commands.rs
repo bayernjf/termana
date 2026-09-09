@@ -52,13 +52,8 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Resolve a project's agent command and launch it in a new terminal.
-fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
-    let project = cfg
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .ok_or_else(|| format!("project not found: {}", project_id))?;
+/// Resolve a project's agent into the command to run and the terminal title.
+fn resolve_agent(cfg: &config::Config, project: &Project) -> (String, String) {
     // Resolve: built-in agent > custom agent > raw agent id.
     let (command, agent_name) = config::builtin_agents()
         .iter()
@@ -74,6 +69,17 @@ fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), Stri
     // Window/tab title: "project — agent" so the user can identify the
     // project even after the agent changes its own title in the TUI.
     let title = format!("{} — {}", project.name, agent_name);
+    (command, title)
+}
+
+/// Resolve a project's agent command and launch it in a new terminal.
+fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
+    let project = cfg
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .ok_or_else(|| format!("project not found: {}", project_id))?;
+    let (command, title) = resolve_agent(cfg, project);
     let term = terminal::default_terminal();
     term.launch(&title, &project.path, &command)
 }
@@ -731,6 +737,88 @@ mod tests {
 
     fn write(root: &TempDir, name: &str, content: &str) {
         std::fs::write(root.path().join(name), content).unwrap();
+    }
+
+    fn project_with_agent(agent: &str) -> Project {
+        Project {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            path: "/tmp/test".to_string(),
+            agent: agent.to_string(),
+            legacy_context: None,
+            created_at: 0,
+            last_launched: None,
+            launch_count: 0,
+        }
+    }
+
+    fn config_with_agents(agents: Vec<Agent>) -> config::Config {
+        config::Config {
+            projects: vec![],
+            agents,
+            groups: vec![],
+        }
+    }
+
+    fn custom_agent(id: &str, name: &str, command: &str) -> Agent {
+        Agent {
+            id: id.to_string(),
+            name: name.to_string(),
+            command: command.to_string(),
+        }
+    }
+
+    fn project_with_id(id: &str) -> Project {
+        Project {
+            id: id.to_string(),
+            ..project_with_agent("codex")
+        }
+    }
+
+    #[test]
+    fn resolves_builtin_agent_command() {
+        let cfg = config_with_agents(vec![]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("claude-code"));
+
+        assert_eq!(command, "claude");
+        assert_eq!(title, "Test — Claude Code");
+    }
+
+    #[test]
+    fn resolves_custom_agent_command() {
+        let cfg = config_with_agents(vec![custom_agent("gemini", "Gemini", "gemini --yolo")]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("gemini"));
+
+        assert_eq!(command, "gemini --yolo");
+        assert_eq!(title, "Test — Gemini");
+    }
+
+    #[test]
+    fn builtin_takes_precedence_over_custom_with_same_id() {
+        // A custom agent must never shadow a shipped preset.
+        let cfg = config_with_agents(vec![custom_agent("claude-code", "Hijack", "hijacked")]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("claude-code"));
+
+        assert_eq!(command, "claude");
+        assert_eq!(title, "Test — Claude Code");
+    }
+
+    #[test]
+    fn falls_back_to_raw_agent_id_when_unknown() {
+        // A deleted or unknown agent still launches, using the id verbatim.
+        let cfg = config_with_agents(vec![]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("ghost"));
+
+        assert_eq!(command, "ghost");
+        assert_eq!(title, "Test — ghost");
+    }
+
+    #[test]
+    fn unique_project_id_suffixes_collisions() {
+        let existing = vec![project_with_id("app"), project_with_id("app-2")];
+
+        assert_eq!(unique_project_id(&existing, "app"), "app-3");
+        assert_eq!(unique_project_id(&existing, "other"), "other");
     }
 
     #[test]
