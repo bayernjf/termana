@@ -739,6 +739,88 @@ mod tests {
         std::fs::write(root.path().join(name), content).unwrap();
     }
 
+    fn project_with_agent(agent: &str) -> Project {
+        Project {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            path: "/tmp/test".to_string(),
+            agent: agent.to_string(),
+            legacy_context: None,
+            created_at: 0,
+            last_launched: None,
+            launch_count: 0,
+        }
+    }
+
+    fn config_with_agents(agents: Vec<Agent>) -> config::Config {
+        config::Config {
+            projects: vec![],
+            agents,
+            groups: vec![],
+        }
+    }
+
+    fn custom_agent(id: &str, name: &str, command: &str) -> Agent {
+        Agent {
+            id: id.to_string(),
+            name: name.to_string(),
+            command: command.to_string(),
+        }
+    }
+
+    fn project_with_id(id: &str) -> Project {
+        Project {
+            id: id.to_string(),
+            ..project_with_agent("codex")
+        }
+    }
+
+    #[test]
+    fn resolves_builtin_agent_command() {
+        let cfg = config_with_agents(vec![]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("claude-code"));
+
+        assert_eq!(command, "claude");
+        assert_eq!(title, "Test — Claude Code");
+    }
+
+    #[test]
+    fn resolves_custom_agent_command() {
+        let cfg = config_with_agents(vec![custom_agent("gemini", "Gemini", "gemini --yolo")]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("gemini"));
+
+        assert_eq!(command, "gemini --yolo");
+        assert_eq!(title, "Test — Gemini");
+    }
+
+    #[test]
+    fn builtin_takes_precedence_over_custom_with_same_id() {
+        // A custom agent must never shadow a shipped preset.
+        let cfg = config_with_agents(vec![custom_agent("claude-code", "Hijack", "hijacked")]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("claude-code"));
+
+        assert_eq!(command, "claude");
+        assert_eq!(title, "Test — Claude Code");
+    }
+
+    #[test]
+    fn falls_back_to_raw_agent_id_when_unknown() {
+        // A deleted or unknown agent still launches, using the id verbatim.
+        let cfg = config_with_agents(vec![]);
+        let (command, title) = resolve_agent(&cfg, &project_with_agent("ghost"));
+
+        assert_eq!(command, "ghost");
+        assert_eq!(title, "Test — ghost");
+    }
+
+    #[test]
+    fn unique_project_id_suffixes_collisions() {
+        let existing = vec![project_with_id("app"), project_with_id("app-2")];
+
+        assert_eq!(unique_project_id(&existing, "app"), "app-3");
+        assert_eq!(unique_project_id(&existing, "other"), "other");
+    }
+
     #[test]
     fn reads_the_six_context_states() {
         let root = tempfile::tempdir().unwrap();
