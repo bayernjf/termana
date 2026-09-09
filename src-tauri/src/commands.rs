@@ -52,13 +52,8 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Resolve a project's agent command and launch it in a new terminal.
-fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
-    let project = cfg
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .ok_or_else(|| format!("project not found: {}", project_id))?;
+/// Resolve a project's agent into the command to run and the terminal title.
+fn resolve_agent(cfg: &config::Config, project: &Project) -> (String, String) {
     // Resolve: built-in agent > custom agent > raw agent id.
     let (command, agent_name) = config::builtin_agents()
         .iter()
@@ -74,6 +69,17 @@ fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), Stri
     // Window/tab title: "project — agent" so the user can identify the
     // project even after the agent changes its own title in the TUI.
     let title = format!("{} — {}", project.name, agent_name);
+    (command, title)
+}
+
+/// Resolve a project's agent command and launch it in a new terminal.
+fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
+    let project = cfg
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .ok_or_else(|| format!("project not found: {}", project_id))?;
+    let (command, title) = resolve_agent(cfg, project);
     let term = terminal::default_terminal();
     term.launch(&title, &project.path, &command)
 }
