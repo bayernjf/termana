@@ -1,0 +1,60 @@
+name: CI
+
+# Type-check the frontend and run the Rust test suite on every push / PR.
+#
+# Why macos-latest and not ubuntu-latest:
+#   `adapters::terminal::default_terminal()` has a `compile_error!` for any
+#   target that is not macOS or Windows, so the crate cannot be compiled on
+#   Linux at all. macOS runners are free for public repositories.
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+concurrency:
+  # Superseded runs carry no value here (unlike release.yml, which must never
+  # be cancelled mid-publish).
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # The frontend has no test suite of its own, so `tsc --noEmit` is the
+      # only automated signal for src/main.ts. Not required by the Rust tests.
+      - name: Type check
+        run: npm run check
+
+      - name: Run Rust tests
+        run: npm test
