@@ -1,6 +1,6 @@
 # termana - Handoff
 
-> Last updated: 2026-09-09 (test suite + CI added; version/asset-selection tests).
+> Last updated: 2026-09-10 (config error reporting + agent command detection hardened; 32 Rust tests).
 
 ## Product
 
@@ -11,7 +11,9 @@ termana is a local-first Tauri desktop app for registering projects, binding a C
 - **v0 launcher:** implemented on macOS; Windows adapter exists but still needs real-machine verification.
 - **v1 context editor:** implemented. The old config-owned sync model and launch-time file overwrite have been removed.
 - **v1.1 updates & announcements:** implemented. Update check fetches the latest GitHub release version. Announcements are fetched from the repo's `announcements.json` (with a local-dev fallback), displayed in a bell icon dropdown, and dismissible per-id via localStorage.
-- **Tests & CI:** 24 Rust unit tests pass locally and in GitHub Actions (`.github/workflows/ci.yml`, on push/PR to `main`/`dev`). `npm test` runs them, `npm run check` type-checks the frontend. CI runs on `macos-latest` because `adapters::terminal::default_terminal()` has a `compile_error!` on non-macOS/Windows targets; the crate does not compile on Linux.
+- **Tests & CI:** 32 Rust unit tests pass locally and in GitHub Actions (`.github/workflows/ci.yml`, on push/PR to `main`/`dev`). `npm test` runs them, `npm run check` type-checks the frontend. CI runs on `macos-latest` because `adapters::terminal::default_terminal()` has a `compile_error!` on non-macOS/Windows targets; the crate does not compile on Linux.
+- **Config error reporting (hardened):** `config::load()` no longer silently swallows a damaged `config.toml`. `load_with_status()` exposes the parse/read warning, the new `config_status` command surfaces it as an app banner, and `save()` refuses to overwrite an unreadable config so a salvaged (empty) config can never destroy the user's projects/agents/groups. Writes stay refused until the file is fixed by hand.
+- **Agent command detection (hardened):** `adapters::agent::executable_name()` extracts the first token (unquoting quoted names), so `installed_status` no longer misreads flags/args — `"gemini --yolo"` probes `gemini` on both macOS and Windows. `resolve_and_launch` checks PATH *before* opening a terminal and returns a clear `agent "X" is not installed` error instead of a `command not found` inside the shell; this covers single launches and group launches.
 - **Measured line coverage (Rust, `cargo llvm-cov`):** 52% overall — `config.rs` 71%, `update.rs` 61%, `commands.rs` 52%; the adapters, `lib.rs` and `main.rs` are untested IO/wiring. `src/main.ts` has no test runner; `tsc --noEmit` is its only automated check. Coverage is deliberately not gated in CI.
 - **Working tree:** clean; `dev` is 4 commits ahead of `origin/dev` (`b73ff74` agent-resolution refactor, `5f3eda4` config/agent tests, `fa02d00` CI, `42e8417` version/asset tests), unpushed. Verify `git status` rather than relying on these hashes.
 
@@ -54,7 +56,7 @@ npm run check     # tsc --noEmit (frontend's only automated signal)
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
-The Rust tests cover all six AGENTS/CLAUDE states, legacy migration merging, pointer creation, conversion consent, stale revisions, and CLAUDE symlinks; config parsing (defaults, legacy `context`, unknown keys, slugify); agent command resolution (built-in vs custom vs raw id, id-collision suffixing); and the updater's `is_newer` / `pick_asset_url` pure logic. Agent resolution was extracted from `resolve_and_launch` into a pure `resolve_agent` helper so it can be tested without opening a terminal.
+The Rust tests cover all six AGENTS/CLAUDE states, legacy migration merging, pointer creation, conversion consent, stale revisions, and CLAUDE symlinks; config parsing (defaults, legacy `context`, unknown keys, slugify); agent command resolution (built-in vs custom vs raw id, id-collision suffixing); config damage detection and the save-overwrite guard; executable-name extraction and PATH probing (flag-bearing commands included); and the updater's `is_newer` / `pick_asset_url` pure logic. Agent resolution was extracted from `resolve_and_launch` into a pure `resolve_agent` helper so it can be tested without opening a terminal; `launch` rejects a missing command before any terminal opens, which is also covered by a test.
 
 Known `is_newer` quirk pinned by tests: non-numeric version segments are silently dropped, so `0.1.0-rc1` never compares newer than `0.1.0` and dev snapshots never prompt. Change this if prereleases should ever be offered.
 
@@ -62,5 +64,4 @@ Known `is_newer` quirk pinned by tests: non-numeric version segments are silentl
 
 - Push `dev` (or open a PR) so the new CI workflow gets its first real run.
 - Run and package on a Windows machine.
-- Harden general config error reporting and custom-agent command detection outside the v1 editor scope.
 - Add deeper per-project agent settings (model / permissions / MCP), then cross-agent observability and handoff.
