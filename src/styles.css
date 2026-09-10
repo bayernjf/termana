@@ -74,6 +74,26 @@ body {
   font-size: 13px;
 }
 
+/* ---- config warning banner ---- */
+.config-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -18px 0 20px;
+  padding: 10px 14px;
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  border-radius: var(--radius-sm);
+  color: #f0a9a6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.config-warning::before {
+  content: "⚠";
+  flex: none;
+}
+
 /* ---- main tabs ---- */
 .tabs {
   display: flex;

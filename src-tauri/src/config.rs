@@ -99,15 +99,51 @@ fn config_path() -> PathBuf {
     base.join("termana").join("config.toml")
 }
 
-pub fn load() -> Config {
-    match std::fs::read_to_string(config_path()) {
-        Ok(s) => toml::from_str(&s).unwrap_or_default(),
-        Err(_) => Config::default(),
+/// Warning to surface when `path` exists but cannot be safely read back and
+/// parsed, or `None` when the file is absent or healthy. Used both to
+/// report config damage to the UI and to guard `save()` from overwriting it.
+fn unreadable_config_warning(path: &std::path::Path) -> Option<String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => match toml::from_str::<Config>(&raw) {
+            Ok(_) => None,
+            Err(error) => Some(format!("config.toml could not be parsed: {error}")),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(format!("config.toml could not be read: {error}")),
     }
 }
 
-pub fn save(cfg: &Config) -> Result<(), String> {
+/// Load the config together with a warning about read / parse failures.
+///
+/// When the returned warning is `Some`, the returned `Config` is whatever
+/// could be salvaged (normally empty). Callers that display UI (or refuse to
+/// write) should surface the warning instead of silently treating the user's
+/// data as absent.
+pub fn load_with_status() -> (Config, Option<String>) {
     let path = config_path();
+    let cfg = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| toml::from_str(&raw).ok())
+        .unwrap_or_default();
+    let warning = unreadable_config_warning(&path);
+    (cfg, warning)
+}
+
+pub fn load() -> Config {
+    load_with_status().0
+}
+
+pub fn save(cfg: &Config) -> Result<(), String> {
+    // Refuse to overwrite a config file that failed to parse or read: saving
+    // the salvaged (usually empty) config would permanently destroy the
+    // user's projects, agents and groups. The user must fix config.toml by
+    // hand; every write command reports this error until then.
+    let path = config_path();
+    if let Some(warning) = unreadable_config_warning(&path) {
+        return Err(format!(
+            "Refusing to overwrite config: {warning}. Fix config.toml manually to keep your data."
+        ));
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -185,6 +221,36 @@ mod tests {
         // since load() itself reads the real user-global config path.
         assert!(toml::from_str::<Config>("[[projects]]\nid = ").is_err());
         assert!(Config::default().projects.is_empty());
+    }
+
+    #[test]
+    fn unreadable_config_warning_detects_malformed_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[[projects]]\nid = ").unwrap();
+
+        let warning = unreadable_config_warning(&path).expect("malformed config must warn");
+        assert!(warning.contains("could not be parsed"), "unexpected: {warning}");
+    }
+
+    #[test]
+    fn unreadable_config_warning_is_clean_for_valid_and_missing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.toml");
+        assert_eq!(unreadable_config_warning(&missing), None);
+
+        let healthy = dir.path().join("healthy.toml");
+        std::fs::write(
+            &healthy,
+            "[[projects]]\nid = \"a\"\nname = \"A\"\npath = \"/tmp\"\nagent = \"codex\"\n",
+        )
+        .unwrap();
+        assert_eq!(unreadable_config_warning(&healthy), None);
+
+        // A present-but-empty file is valid TOML (an empty table), not damage.
+        let empty = dir.path().join("empty.toml");
+        std::fs::write(&empty, "").unwrap();
+        assert_eq!(unreadable_config_warning(&empty), None);
     }
 
     #[test]

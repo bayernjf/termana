@@ -73,6 +73,10 @@ fn resolve_agent(cfg: &config::Config, project: &Project) -> (String, String) {
 }
 
 /// Resolve a project's agent command and launch it in a new terminal.
+///
+/// The resolved command is checked against PATH *before* a terminal opens,
+/// so a missing or mistyped agent yields a clear error here instead of a
+/// `command not found` inside the launched shell.
 fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), String> {
     let project = cfg
         .projects
@@ -80,8 +84,27 @@ fn resolve_and_launch(cfg: &config::Config, project_id: &str) -> Result<(), Stri
         .find(|p| p.id == project_id)
         .ok_or_else(|| format!("project not found: {}", project_id))?;
     let (command, title) = resolve_agent(cfg, project);
+    if !agent::installed_status(&[&command])[0] {
+        return Err(format!(
+            "agent \"{}\" is not installed (command: \"{}\"). Install it, or use an absolute path to an executable in the Agents tab (shell functions and aliases are not detected).",
+            title_agent_name(&title), command
+        ));
+    }
     let term = terminal::default_terminal();
     term.launch(&title, &project.path, &command)
+}
+
+/// The agent half of a launch title (`"project — agent"`), for error messages.
+fn title_agent_name(title: &str) -> &str {
+    title.rsplit(" — ").next().unwrap_or(title)
+}
+
+/// Whether the user's config file is healthy. `None` means healthy; `Some`
+/// carries a warning (parse / read failure) that the UI should surface so the
+/// user knows why their projects appear missing and why writes are refused.
+#[tauri::command]
+pub fn config_status() -> Option<String> {
+    config::load_with_status().1
 }
 
 // ---- projects ----
@@ -811,6 +834,28 @@ mod tests {
 
         assert_eq!(command, "ghost");
         assert_eq!(title, "Test — ghost");
+    }
+
+    #[test]
+    fn launch_rejects_a_missing_agent_command_before_opening_a_terminal() {
+        // The command exists neither as a preset nor on PATH, so launch must
+        // fail with a clear error instead of opening a terminal that prints
+        // `command not found`.
+        let cfg = config::Config {
+            projects: vec![project_with_agent("termana-no-such-command-9f3b2")],
+            agents: vec![],
+            groups: vec![],
+        };
+        let error = resolve_and_launch(&cfg, "test").unwrap_err();
+
+        assert!(error.contains("is not installed"), "unexpected: {error}");
+        assert!(error.contains("termana-no-such-command-9f3b2"), "unexpected: {error}");
+    }
+
+    #[test]
+    fn title_agent_name_returns_the_agent_half() {
+        assert_eq!(title_agent_name("My Project — Claude Code"), "Claude Code");
+        assert_eq!(title_agent_name("no separator"), "no separator");
     }
 
     #[test]

@@ -505,6 +505,19 @@ window.addEventListener("DOMContentLoaded", async () => {
   await refreshProjects();
   await refreshGroups();
 
+  // Surface config damage (unreadable / unparsable config.toml) so the user
+  // knows why projects look missing and why writes are refused.
+  try {
+    const warning = await invoke<string | null>("config_status");
+    const banner = document.getElementById("config-warning");
+    if (banner && warning) {
+      banner.textContent = `${warning} Your data is safe; fix the file and restart termana.`;
+      banner.classList.remove("hidden");
+    }
+  } catch {
+    // config_status is best-effort; the app still works without the banner.
+  }
+
   // ---- announcements ----
   const dismissedAnnouncements = new Set(
     JSON.parse(localStorage.getItem("termana.dismissedAnnouncements") ?? "[]") as string[]
