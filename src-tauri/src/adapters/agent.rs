@@ -39,6 +39,16 @@ pub fn executable_name(command: &str) -> &str {
     trimmed.split_whitespace().next().unwrap_or("")
 }
 
+/// Quote a string for POSIX shell single-quote context (`'` → `'\''`).
+///
+/// Anything inside single quotes is inert to the shell — no substitution,
+/// no globbing, no word splitting — so this safely embeds an arbitrary
+/// executable name into a `-c` script.
+#[cfg(unix)]
+fn sh_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Check whether each command is available on PATH, in a SINGLE shell call.
 ///
 /// Only the executable name of each command is probed (see
@@ -72,7 +82,8 @@ pub fn installed_status(commands: &[&str]) -> Vec<bool> {
             .iter()
             .map(|c| {
                 format!(
-                    "p=$(command -v {c} 2>/dev/null); case \"$p\" in /*) printf '1\\n';; *) printf '0\\n';; esac"
+                    "p=$(command -v {c} 2>/dev/null); case \"$p\" in /*) printf '1\\n';; *) printf '0\\n';; esac",
+                    c = sh_single_quote(c)
                 )
             })
             .collect::<Vec<_>>()
@@ -166,5 +177,43 @@ mod tests {
             "termana-no-such-command-9f3b2",
         ]);
         assert_eq!(flags, vec![true, true, false]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installed_status_cannot_be_injected_via_executable_name() {
+        // `executable_name` strips the outer quotes, leaving the payload as
+        // the probed "executable"; `command -v` must see it as inert data,
+        // never as shell to evaluate.
+        let pocs = [
+            "/tmp/termana_poc_agent_subst",
+            "/tmp/termana_poc_agent_backtick",
+            "/tmp/termana_poc_agent_semi",
+        ];
+        for poc in &pocs {
+            let _ = std::fs::remove_file(poc);
+        }
+
+        let flags = installed_status(&[
+            "'$(touch /tmp/termana_poc_agent_subst)'",
+            "'`touch /tmp/termana_poc_agent_backtick`'",
+            "\"; touch /tmp/termana_poc_agent_semi; echo '",
+        ]);
+        assert_eq!(flags, vec![false, false, false]);
+
+        for poc in &pocs {
+            assert!(
+                !std::path::Path::new(poc).exists(),
+                "injection executed: {poc}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sh_single_quote_wraps_single_quotes_posix_style() {
+        assert_eq!(sh_single_quote("plain"), "'plain'");
+        assert_eq!(sh_single_quote("a'b"), "'a'\\''b'");
+        assert_eq!(sh_single_quote("$(x); `y`"), "'$(x); `y`'");
     }
 }
