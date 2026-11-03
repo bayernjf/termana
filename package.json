@@ -11,7 +11,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "check": "tsc --noEmit",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test:frontend": "node --import tsx --test src/ui-logic.test.ts",
+    "test": "npm run test:frontend && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.12.4",
@@ -22,6 +23,8 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
     "typescript": "~5.6.2",
     "vite": "^6.0.3"
   }
