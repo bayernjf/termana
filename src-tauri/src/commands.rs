@@ -148,13 +148,24 @@ pub fn remove_project(id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn launch_project(id: String) -> Result<(), String> {
-    let mut cfg = config::load();
-    if let Some(p) = cfg.projects.iter_mut().find(|p| p.id == id) {
+    let cfg = config::load();
+    // Launch first; only record stats after the launch actually succeeds, so
+    // failed attempts (missing agent, terminal error) don't inflate
+    // launch_count / last_launched.
+    resolve_and_launch(&cfg, &id)?;
+    let mut cfg = cfg;
+    record_launch(&mut cfg, &id);
+    config::save(&cfg)?;
+    Ok(())
+}
+
+/// Record a successful launch in the given config: bump `launch_count` and
+/// stamp `last_launched`. Unknown ids are ignored (nothing to record).
+fn record_launch(cfg: &mut config::Config, project_id: &str) {
+    if let Some(p) = cfg.projects.iter_mut().find(|p| p.id == project_id) {
         p.last_launched = Some(now());
         p.launch_count += 1;
     }
-    config::save(&cfg)?;
-    resolve_and_launch(&cfg, &id)
 }
 
 /// Persist a manual ordering of projects by id. Ids not present in
@@ -796,6 +807,37 @@ mod tests {
             id: id.to_string(),
             ..project_with_agent("codex")
         }
+    }
+
+    #[test]
+    fn record_launch_bumps_count_and_timestamp_for_known_project() {
+        let mut cfg = config::Config {
+            projects: vec![project_with_id("test")],
+            agents: vec![],
+            groups: vec![],
+        };
+
+        record_launch(&mut cfg, "test");
+
+        let p = &cfg.projects[0];
+        assert_eq!(p.launch_count, 1);
+        assert!(p.last_launched.is_some());
+    }
+
+    #[test]
+    fn record_launch_ignores_unknown_project() {
+        // Failure path of launch_project returns before record_launch runs;
+        // even if called directly, an unknown id must be a no-op.
+        let mut cfg = config::Config {
+            projects: vec![project_with_id("test")],
+            agents: vec![],
+            groups: vec![],
+        };
+
+        record_launch(&mut cfg, "no-such-project");
+
+        assert_eq!(cfg.projects[0].launch_count, 0);
+        assert!(cfg.projects[0].last_launched.is_none());
     }
 
     #[test]
