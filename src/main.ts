@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, confirm, message } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { marked } from "marked";
+import { renderSafeMarkdown } from "./markdown";
 
 interface Project {
   id: string;
@@ -101,11 +101,6 @@ function escapeHtml(s: string): string {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string)
   );
 }
-
-const previewRenderer = new marked.Renderer();
-previewRenderer.html = ({ text }) => escapeHtml(text);
-previewRenderer.link = ({ tokens }) => previewRenderer.parser.parseInline(tokens);
-previewRenderer.image = ({ text }) => escapeHtml(`[image: ${text}]`);
 
 function renderContextBadges(projectId: string): string {
   const status = contextStatuses.get(projectId);
@@ -401,7 +396,7 @@ async function showContextMode(mode: "edit" | "preview") {
   const text = document.getElementById("context-text") as HTMLTextAreaElement;
   const preview = document.getElementById("context-preview")!;
   if (mode === "preview") {
-    preview.innerHTML = await marked.parse(text.value, { renderer: previewRenderer });
+    preview.innerHTML = await renderSafeMarkdown(text.value);
     text.classList.add("hidden");
     preview.classList.remove("hidden");
   } else {
@@ -564,7 +559,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           : (
               await Promise.all(
                 items.map(async (a) => {
-                  const content = await marked.parse(a.content);
+                  const content = await renderSafeMarkdown(a.content);
                   return `
         <div class="announcement-item ${escapeHtml(a.severity)}" data-id="${escapeHtml(a.id)}">
           <div class="announcement-head">
@@ -606,7 +601,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           if (expired) tags.push('<span class="announcement-tag expired">已过期</span>');
           else if (dismissed) tags.push('<span class="announcement-tag dismissed">已关闭</span>');
           else tags.push('<span class="announcement-tag active">进行中</span>');
-          const content = await marked.parse(a.content);
+          const content = await renderSafeMarkdown(a.content);
           return `
         <div class="announcement-item history ${escapeHtml(a.severity)} ${expired || dismissed ? "muted" : ""}" data-id="${escapeHtml(a.id)}">
           <div class="announcement-head">
