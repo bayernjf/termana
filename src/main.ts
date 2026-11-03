@@ -1,4 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  contextBadges,
+  countByAgent,
+  escapeHtml,
+  filterByAgent,
+  labelForAgent,
+  orderProjects,
+  projectNameFromPath,
+} from "./ui-logic";
 import { open, confirm, message } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -96,62 +105,23 @@ let activeTab: string = localStorage.getItem("termana.activeTab") ?? "projects";
 
 const CONTEXT_FILES = "AGENTS.md (+ CLAUDE.md pointer)";
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string)
-  );
-}
-
 function renderContextBadges(projectId: string): string {
   const status = contextStatuses.get(projectId);
   if (!status) return "";
-  const badges: string[] = [];
-  if (status.divergent) {
-    badges.push('<span class="ctx-badge warning" title="AGENTS.md and CLAUDE.md differ">divergent</span>');
-  }
-  if (status.hasMergeBlock) {
-    badges.push('<span class="ctx-badge warning" title="AGENTS.md has an unresolved merge block">merge</span>');
-  }
-  if (status.hasLegacyContext) {
-    badges.push('<span class="ctx-badge migration" title="Legacy termana context will be migrated on save">migrate</span>');
-  }
-  if (status.agentsHasContent && badges.length === 0) {
-    badges.push('<span class="ctx-badge" title="AGENTS.md has context">ctx</span>');
-  }
-  return badges.join("");
+  return contextBadges(status)
+    .map(
+      (badge) =>
+        `<span class="ctx-badge${badge.tone ? ` ${badge.tone}` : ""}" title="${escapeHtml(badge.title)}">${badge.label}</span>`,
+    )
+    .join("");
 }
 
 function sortProjects(list: Project[]): Project[] {
-  const mode = projectSortMode;
-  if (mode === "manual") return list;
-  const copy = [...list];
-  switch (mode) {
-    case "name-asc":
-      copy.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-      break;
-    case "name-desc":
-      copy.sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: "base" }));
-      break;
-    case "added-asc":
-      copy.sort((a, b) => a.createdAt - b.createdAt);
-      break;
-    case "added-desc":
-      copy.sort((a, b) => b.createdAt - a.createdAt);
-      break;
-    case "recent":
-      copy.sort((a, b) => (b.lastLaunched ?? 0) - (a.lastLaunched ?? 0));
-      break;
-  }
-  return copy;
+  return orderProjects(list, projectSortMode);
 }
 
 function agentLabel(agentId: string): string {
-  return agents.find((a) => a.id === agentId)?.name ?? agentId;
-}
-
-function filterProjects(list: Project[]): Project[] {
-  if (projectAgentFilter === "all") return list;
-  return list.filter((p) => p.agent === projectAgentFilter);
+  return labelForAgent(agents, agentId);
 }
 
 function applyTab(tab: string) {
@@ -166,14 +136,7 @@ function applyTab(tab: string) {
 
 // Counts per agent, most projects first; a filtered-on agent stays listed at zero.
 function agentFilterCounts(): [string, number][] {
-  const counts = new Map<string, number>();
-  for (const p of projects) counts.set(p.agent, (counts.get(p.agent) ?? 0) + 1);
-  if (projectAgentFilter !== "all" && !counts.has(projectAgentFilter)) {
-    counts.set(projectAgentFilter, 0);
-  }
-  return [...counts.entries()].sort(
-    (a, b) => b[1] - a[1] || agentLabel(a[0]).localeCompare(agentLabel(b[0]))
-  );
+  return countByAgent(projects, projectAgentFilter, agentLabel);
 }
 
 function renderAgentFilter() {
@@ -197,7 +160,7 @@ function renderAgentFilter() {
 
 function renderProjects() {
   const container = document.getElementById("projects")!;
-  const visible = filterProjects(projects);
+  const visible = filterByAgent(projects, projectAgentFilter);
   const countEl = document.getElementById("project-count");
   if (countEl) countEl.textContent = `项目数量：${visible.length}`;
   if (projects.length === 0) {
@@ -759,7 +722,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const fillNameFromPath = () => {
     if (nameTouched) return;
-    const folderName = pathInput.value.split(/[\\/]/).filter(Boolean).pop() ?? "";
+    const folderName = projectNameFromPath(pathInput.value);
     nameInput.value = folderName;
   };
 
