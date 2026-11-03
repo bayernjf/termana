@@ -122,6 +122,7 @@ pub fn add_project(name: String, path: String, agent: String) -> Result<Project,
     if path.trim().is_empty() {
         return Err("path is required".into());
     }
+    let _guard = config::lock();
     let mut cfg = config::load();
     let id = unique_project_id(&cfg.projects, &config::slugify(&name));
     let project = Project {
@@ -141,6 +142,7 @@ pub fn add_project(name: String, path: String, agent: String) -> Result<Project,
 
 #[tauri::command]
 pub fn remove_project(id: String) -> Result<(), String> {
+    let _guard = config::lock();
     let mut cfg = config::load();
     cfg.projects.retain(|p| p.id != id);
     config::save(&cfg)
@@ -153,7 +155,11 @@ pub fn launch_project(id: String) -> Result<(), String> {
     // failed attempts (missing agent, terminal error) don't inflate
     // launch_count / last_launched.
     resolve_and_launch(&cfg, &id)?;
-    let mut cfg = cfg;
+    // Reload under the guard after the launch: another command may have changed
+    // the config while the terminal was starting, and saving the stale snapshot
+    // would drop that change.
+    let _guard = config::lock();
+    let mut cfg = config::load();
     record_launch(&mut cfg, &id);
     config::save(&cfg)?;
     Ok(())
@@ -172,6 +178,7 @@ fn record_launch(cfg: &mut config::Config, project_id: &str) {
 /// `ordered_ids` are appended in their previous relative order.
 #[tauri::command]
 pub fn reorder_projects(ordered_ids: Vec<String>) -> Result<(), String> {
+    let _guard = config::lock();
     let mut cfg = config::load();
     let mut by_id: std::collections::HashMap<String, config::Project> =
         cfg.projects.into_iter().map(|p| (p.id.clone(), p)).collect();
@@ -517,6 +524,7 @@ pub fn save_context(
     let mut legacy_migrated = false;
     let mut legacy_error = None;
     if migrate_legacy && project.legacy_context.is_some() {
+        let _guard = config::lock();
         let mut latest = config::load();
         if let Some(target) = latest
             .projects
@@ -635,6 +643,7 @@ pub fn add_agent(name: String, command: String) -> Result<Agent, String> {
     if config::is_builtin_id(&id_base) {
         return Err("a built-in agent with this name already exists".into());
     }
+    let _guard = config::lock();
     let mut cfg = config::load();
     let id = unique_agent_id(&cfg.agents, &id_base);
     let new_agent = Agent {
@@ -658,6 +667,7 @@ pub fn update_agent(id: String, name: String, command: String) -> Result<(), Str
     if command.trim().is_empty() {
         return Err("command is required".into());
     }
+    let _guard = config::lock();
     let mut cfg = config::load();
     let target = cfg
         .agents
@@ -674,6 +684,7 @@ pub fn remove_agent(id: String) -> Result<(), String> {
     if config::is_builtin_id(&id) {
         return Err("built-in agents cannot be deleted".into());
     }
+    let _guard = config::lock();
     let mut cfg = config::load();
     cfg.agents.retain(|a| a.id != id);
     config::save(&cfg)
@@ -691,6 +702,7 @@ pub fn add_group(name: String, project_ids: Vec<String>) -> Result<Group, String
     if name.trim().is_empty() {
         return Err("name is required".into());
     }
+    let _guard = config::lock();
     let mut cfg = config::load();
     let id = unique_group_id(&cfg.groups, &config::slugify(&name));
     let group = Group {
@@ -708,6 +720,7 @@ pub fn update_group(id: String, name: String, project_ids: Vec<String>) -> Resul
     if name.trim().is_empty() {
         return Err("name is required".into());
     }
+    let _guard = config::lock();
     let mut cfg = config::load();
     let target = cfg
         .groups
@@ -721,6 +734,7 @@ pub fn update_group(id: String, name: String, project_ids: Vec<String>) -> Resul
 
 #[tauri::command]
 pub fn remove_group(id: String) -> Result<(), String> {
+    let _guard = config::lock();
     let mut cfg = config::load();
     cfg.groups.retain(|g| g.id != id);
     config::save(&cfg)

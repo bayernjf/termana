@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+
+/// Serializes every read-modify-write of the config file. Commands that load,
+/// mutate and save must hold this guard for the whole sequence; otherwise two
+/// concurrent commands can read the same snapshot and the later save silently
+/// drops the earlier command's change.
+static CONFIG_LOCK: Mutex<()> = Mutex::new(());
+
+pub fn lock() -> MutexGuard<'static, ()> {
+    CONFIG_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,27 +130,17 @@ fn unreadable_config_warning(path: &std::path::Path) -> Option<String> {
 /// could be salvaged (normally empty). Callers that display UI (or refuse to
 /// write) should surface the warning instead of silently treating the user's
 /// data as absent.
-pub fn load_with_status() -> (Config, Option<String>) {
-    let path = config_path();
-    let cfg = std::fs::read_to_string(&path)
+fn load_from(path: &Path) -> (Config, Option<String>) {
+    let cfg = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| toml::from_str(&raw).ok())
         .unwrap_or_default();
-    let warning = unreadable_config_warning(&path);
+    let warning = unreadable_config_warning(path);
     (cfg, warning)
 }
 
-pub fn load() -> Config {
-    load_with_status().0
-}
-
-pub fn save(cfg: &Config) -> Result<(), String> {
-    // Refuse to overwrite a config file that failed to parse or read: saving
-    // the salvaged (usually empty) config would permanently destroy the
-    // user's projects, agents and groups. The user must fix config.toml by
-    // hand; every write command reports this error until then.
-    let path = config_path();
-    if let Some(warning) = unreadable_config_warning(&path) {
+fn save_to(path: &Path, cfg: &Config) -> Result<(), String> {
+    if let Some(warning) = unreadable_config_warning(path) {
         return Err(format!(
             "Refusing to overwrite config: {warning}. Fix config.toml manually to keep your data."
         ));
@@ -157,8 +158,24 @@ pub fn save(cfg: &Config) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     temp.write_all(s.as_bytes()).map_err(|e| e.to_string())?;
     temp.as_file().sync_all().map_err(|e| e.to_string())?;
-    temp.persist(&path).map_err(|e| e.error.to_string())?;
+    temp.persist(path).map_err(|e| e.error.to_string())?;
     Ok(())
+}
+
+pub fn load_with_status() -> (Config, Option<String>) {
+    load_from(&config_path())
+}
+
+pub fn load() -> Config {
+    load_with_status().0
+}
+
+pub fn save(cfg: &Config) -> Result<(), String> {
+    // Refuse to overwrite a config file that failed to parse or read: saving
+    // the salvaged (usually empty) config would permanently destroy the
+    // user's projects, agents and groups. The user must fix config.toml by
+    // hand; every write command reports this error until then.
+    save_to(&config_path(), cfg)
 }
 
 #[cfg(test)]
@@ -283,5 +300,94 @@ mod tests {
         // Leading/trailing separators are trimmed, and an id is never empty.
         assert_eq!(slugify("  "), "item");
         assert_eq!(slugify(""), "item");
+    }
+
+    fn test_project(n: usize) -> Project {
+        Project {
+            id: format!("p{n}"),
+            name: format!("Project {n}"),
+            path: format!("/tmp/p{n}"),
+            agent: "codex".to_string(),
+            legacy_context: None,
+            created_at: n as i64,
+            last_launched: None,
+            launch_count: 0,
+        }
+    }
+
+    /// Regression for P2-3: without the guard, all threads read the same empty
+    /// snapshot and the last writer silently erases the other projects.
+    #[test]
+    fn unguarded_read_modify_write_loses_concurrent_changes() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = Arc::new(dir.path().join("config.toml"));
+        save_to(&path, &Config::default()).unwrap();
+        let barrier = Arc::new(Barrier::new(8));
+        let mut handles = Vec::new();
+        for n in 0..8 {
+            let path = Arc::clone(&path);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                let (mut cfg, warning) = load_from(&path);
+                assert!(warning.is_none());
+                barrier.wait();
+                cfg.projects.push(test_project(n));
+                save_to(&path, &cfg).unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let (cfg, warning) = load_from(&path);
+        assert!(warning.is_none());
+        assert_eq!(
+            cfg.projects.len(),
+            1,
+            "the old unguarded pattern must lose updates (got {})",
+            cfg.projects.len()
+        );
+    }
+
+    /// Same workload as above, but every load-modify-save holds `lock()` for the
+    /// whole sequence, so no project is lost.
+    #[test]
+    fn guarded_read_modify_write_keeps_concurrent_changes() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = Arc::new(dir.path().join("config.toml"));
+        save_to(&path, &Config::default()).unwrap();
+        let barrier = Arc::new(Barrier::new(8));
+        let mut handles = Vec::new();
+        for n in 0..8 {
+            let path = Arc::clone(&path);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let _guard = lock();
+                let (mut cfg, warning) = load_from(&path);
+                assert!(warning.is_none());
+                // Widen the read-modify-write window; the guard keeps it safe.
+                thread::sleep(Duration::from_millis(5));
+                cfg.projects.push(test_project(n));
+                save_to(&path, &cfg).unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let (cfg, warning) = load_from(&path);
+        assert!(warning.is_none());
+        let mut ids: Vec<String> = cfg.projects.iter().map(|p| p.id.clone()).collect();
+        ids.sort();
+        let expected: Vec<String> = (0..8).map(|n| format!("p{n}")).collect();
+        assert_eq!(ids, expected, "every guarded change must survive");
     }
 }
